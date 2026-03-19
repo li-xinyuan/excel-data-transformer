@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  excel-transformer:
+    build: .
+    container_name: excel-transformer
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./output:/app/output
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production

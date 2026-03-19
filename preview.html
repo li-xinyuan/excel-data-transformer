@@ -1,0 +1,3049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel数据转换工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary-gradient: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+            --source-gradient: linear-gradient(135deg, #06d6a0 0%, #1b9aaa 100%);
+            --target-gradient: linear-gradient(135deg, #f72585 0%, #7209b7 100%);
+            --success-color: #4caf50;
+            --warning-color: #ff9800;
+            --error-color: #f44336;
+            --info-color: #2196f3;
+            --light-bg: #f8f9fa;
+            --card-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            --transition: all 0.3s ease;
+        }
+        
+        body {
+            font-family: 'Inter', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            flex: 1;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 12px;
+            font-weight: 700;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            padding: 15px 25px;
+            border-radius: 12px;
+            min-width: 120px;
+            transition: var(--transition);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .stat-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        
+        .stat-item .value {
+            font-size: 28px;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-item .label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }
+        
+        .main-content {
+            display: flex;
+            gap: 10px;
+            position: relative;
+            min-width: 0;
+            width: 100%;
+            margin-bottom: 150px;
+            animation: slideUp 0.6s ease-out;
+        }
+        
+        .excel-panel {
+            flex: 0.8;
+            background: white;
+            border-radius: 16px;
+            box-shadow: var(--card-shadow);
+            overflow: hidden;
+            min-height: 550px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            transition: var(--transition);
+        }
+        
+        .excel-panel:hover {
+            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+        }
+        
+        .excel-panel .table-container {
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .field-list {
+            list-style: none;
+            min-width: 0;
+        }
+        
+        .field-item {
+            padding: 14px 18px;
+            margin: 6px 8px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: relative;
+            border: 1px solid transparent;
+        }
+        
+        .field-item:hover {
+            transform: translateX(8px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .mapping-area {
+            flex: 0.6;
+            min-width: 300px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .config-list-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
+            margin: 15px;
+            padding: 15px;
+            flex: 0 0 auto;
+        }
+        
+        .config-list-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .config-list-header label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            white-space: nowrap;
+        }
+        
+        .config-select {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .config-select:hover {
+            border-color: #4361ee;
+        }
+        
+        .config-select:focus {
+            outline: none;
+            border-color: #4361ee;
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+        
+        .config-actions-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .config-actions-row .btn {
+            flex: 1;
+            min-width: 70px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        
+        .config-info-bar {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #666;
+            display: none;
+        }
+        
+        .config-info-bar.visible {
+            display: block;
+        }
+        
+        .config-list {
+            display: none;
+        }
+        
+        .config-item.selected {
+            background: #e3f2fd;
+            border-color: var(--info-color);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
+        }
+        
+        .config-item .config-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        .config-item .config-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        
+        .config-item .config-actions {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .config-item .config-actions button {
+            padding: 4px 8px;
+            font-size: 11px;
+            border-radius: 6px;
+        }
+        
+        .mapping-toolbar {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 20;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+        }
+        
+        .mapping-toolbar .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            border-radius: 8px;
+        }
+        
+        .mapping-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .panel-header {
+            padding: 20px 25px;
+            font-weight: 600;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: white;
+            justify-content: space-between;
+        }
+        
+        .panel-stats {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: normal;
+            padding: 4px 15px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.2);
+            min-height: 20px;
+            border-radius: 6px;
+            margin: 0 10px;
+            flex: 1;
+            max-width: 600px;
+        }
+        
+        .panel-stats .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #ffffff;
+            padding: 0 !important;
+            min-width: auto !important;
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+        }
+        
+        .panel-stats .stat-item:hover {
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        
+        .panel-stats .total-fields .value {
+            color: #000000;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .mapped-fields .value {
+            color: #4caf50;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .missing-fields .value {
+            color: #ff9800;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .required-missing .value {
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .required-missing .value.zero {
+            color: #4caf50;
+        }
+        
+        .panel-stats .required-missing .value.non-zero {
+            color: #f44336;
+        }
+        
+        .panel-stats .source-fields .value {
+            color: #000000;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .source-mapped .value {
+            color: #4caf50;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .panel-stats .source-rows .value {
+            color: #000000;
+            font-weight: 700;
+            font-size: 14px !important;
+            display: inline !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+        
+        .source-panel .panel-header {
+            background: var(--source-gradient);
+        }
+        
+        .target-panel .panel-header {
+            background: var(--target-gradient);
+        }
+        
+        .drop-zone {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 3px dashed #ddd;
+            margin: 25px;
+            border-radius: 16px;
+            transition: var(--transition);
+            cursor: pointer;
+            min-height: 320px;
+            position: relative;
+        }
+        
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: #4361ee;
+            background: rgba(67, 97, 238, 0.08);
+            transform: scale(1.02);
+        }
+        
+        .drop-zone.has-file {
+            border-color: var(--success-color);
+            background: rgba(76, 175, 80, 0.08);
+        }
+        
+        .drop-zone-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.4;
+            transition: var(--transition);
+        }
+        
+        .drop-zone:hover .drop-zone-icon {
+            opacity: 0.6;
+            transform: scale(1.1);
+        }
+        
+        .drop-zone-text {
+            font-size: 18px;
+            color: #666;
+            text-align: center;
+            padding: 0 25px;
+            line-height: 1.4;
+        }
+        
+        .drop-zone-text strong {
+            color: #4361ee;
+            font-weight: 600;
+        }
+        
+        .file-info {
+            margin-top: 20px;
+            padding: 12px 20px;
+            background: #e8f5e9;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid #c8e6c9;
+        }
+        
+        .file-info .file-name {
+            font-weight: 500;
+            color: #2e7d32;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .file-info .remove-file {
+            color: var(--error-color);
+            cursor: pointer;
+            font-size: 20px;
+            transition: var(--transition);
+        }
+        
+        .file-info .remove-file:hover {
+            color: #d32f2f;
+            transform: scale(1.2);
+        }
+        
+        .table-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: none;
+        }
+        
+        .table-container.visible {
+            display: block;
+        }
+        
+        .data-preview-table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+        
+        .data-preview-table {
+            border-collapse: collapse;
+            font-size: 13px;
+            table-layout: fixed;
+            min-width: 600px;
+            width: max-content;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .data-preview-table th,
+        .data-preview-table td {
+            border: 1px solid #e0e0e0;
+            padding: 8px 12px;
+            text-align: left;
+            min-width: 90px;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .data-preview-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+        
+        .data-preview-table td {
+            background: white;
+        }
+        
+        .data-preview-table tr:hover td {
+            background: #e3f2fd;
+        }
+        
+        .field-list {
+            list-style: none;
+        }
+        
+        .source-panel .field-item {
+            background: #e8f5e9;
+            border-left: 4px solid #06d6a0;
+        }
+        
+        .source-panel .field-item:hover {
+            background: #c8e6c9;
+        }
+        
+        .target-panel .field-item {
+            background: #fce7f3;
+            border-left: 4px solid #f72585;
+        }
+        
+        .target-panel .field-item:hover {
+            background: #fbcfe8;
+            transform: translateX(-8px);
+        }
+        
+        .field-item.selected {
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.5);
+            border-color: #4361ee;
+        }
+        
+        .field-item.mapped {
+            background: #e3f2fd !important;
+            border-left-color: var(--info-color) !important;
+        }
+        
+        .field-item.required::after {
+            content: '*必填';
+            background: var(--error-color);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            margin-left: auto;
+            font-weight: 500;
+        }
+        
+        .field-item.missing {
+            background: #ffebee !important;
+            border-left-color: var(--error-color) !important;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
+        }
+        
+        .field-name {
+            font-weight: 500;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .field-index {
+            font-size: 12px;
+            color: #666;
+            background: rgba(0,0,0,0.08);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        
+        .mapping-line {
+            stroke-width: 2;
+            fill: none;
+            pointer-events: stroke;
+            cursor: pointer;
+            transition: stroke-width 0.3s ease;
+        }
+        
+        .mapping-line.high {
+            stroke: var(--success-color);
+        }
+        
+        .mapping-line.medium {
+            stroke: var(--warning-color);
+            stroke-dasharray: 5,5;
+        }
+        
+        .mapping-line.low {
+            stroke: var(--error-color);
+            stroke-dasharray: 2,2;
+        }
+        
+        .mapping-line.manual {
+            stroke: var(--info-color);
+            stroke-width: 3;
+        }
+        
+        .mapping-line:hover {
+            stroke-width: 4;
+        }
+        
+        .line-label {
+            font-size: 11px;
+            fill: #333;
+            font-weight: 500;
+        }
+        
+        .controls {
+            background: white;
+            border-radius: 16px 16px 0 0;
+            padding: 15px 20px;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+            animation: slideUp 0.7s ease-out;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group label {
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+        
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-weight: 400;
+            color: #666;
+            transition: var(--transition);
+        }
+        
+        .checkbox-group label:hover {
+            color: #333;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #4361ee;
+        }
+        
+        .btn {
+            padding: 12px 28px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        
+        .btn-primary {
+            background: var(--primary-gradient);
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(67, 97, 238, 0.4);
+        }
+        
+        .btn-danger {
+            background: var(--error-color);
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(244, 67, 54, 0.4);
+        }
+        
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+        
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(76, 175, 80, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            background: #d0d0d0;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 25px;
+            margin-left: auto;
+            flex-wrap: wrap;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .legend-line {
+            width: 35px;
+            height: 4px;
+            border-radius: 2px;
+        }
+        
+        .legend-line.high { background: var(--success-color); }
+        .legend-line.medium { background: var(--warning-color); }
+        .legend-line.low { background: var(--error-color); }
+        .legend-line.manual { background: var(--info-color); }
+        
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #1565c0;
+            border: 1px solid #bbdefb;
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .instructions strong {
+            color: #0d47a1;
+            font-weight: 600;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .config-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            justify-content: center;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .config-list {
+            max-height: 350px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin: 20px 0;
+            padding-right: 15px;
+        }
+        
+        .config-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: var(--transition);
+            background: white;
+        }
+        
+        .config-item:hover {
+            background: #f8f9fa;
+            border-color: #4361ee;
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(67, 97, 238, 0.15);
+        }
+        
+        .config-item.selected {
+            background: #e3f2fd;
+            border-color: var(--info-color);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.15);
+        }
+        
+        .config-item .config-name {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .config-item .config-info {
+            font-size: 13px;
+            color: #666;
+            margin-top: 6px;
+        }
+        
+        .config-item .config-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .config-item .config-actions button {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 6px;
+        }
+        
+        .transform-rules-container {
+            max-height: 350px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .transform-rules-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        
+        .transform-rules-table th {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 2px solid #e0e0e0;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        .transform-rules-table td {
+            padding: 10px 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .transform-rules-table input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: var(--transition);
+        }
+        
+        .transform-rules-table input:focus {
+            outline: none;
+            border-color: #4361ee;
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+        
+        .transform-rules-table .delete-btn {
+            color: var(--error-color);
+            cursor: pointer;
+            font-size: 20px;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+        }
+        
+        .transform-rules-table .delete-btn:hover {
+            color: #d32f2f;
+            background: rgba(244, 67, 54, 0.1);
+        }
+        
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            border-radius: 8px;
+            white-space: nowrap;
+            min-width: 100px;
+        }
+        
+        .field-item .transform-indicator {
+            position: absolute;
+            right: 40px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--warning-color);
+            color: white;
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+        
+        .field-item .transform-indicator:hover {
+            background: #f57c00;
+            transform: translateY(-50%) scale(1.05);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+        
+        .modal.show {
+            display: flex;
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 35px;
+            border-radius: 16px;
+            max-width: 550px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            animation: slideUp 0.4s ease-out;
+            border: 1px solid #e0e0e0;
+            position: relative;
+        }
+        
+
+        
+        .modal-content h3 {
+            margin-bottom: 20px;
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .modal-content p {
+            margin-bottom: 25px;
+            color: #666;
+            line-height: 1.5;
+        }
+        
+        .connection-point {
+            width: 14px;
+            height: 14px;
+            background: #4361ee;
+            border-radius: 50%;
+            position: absolute;
+            right: -7px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: crosshair;
+            z-index: 20;
+            transition: var(--transition);
+            border: 2px solid white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .target-panel .connection-point {
+            left: -7px;
+            right: auto;
+        }
+        
+        .connection-point.active {
+            background: var(--error-color);
+            transform: translateY(-50%) scale(1.4);
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+        }
+        
+        .connection-point.connected {
+            background: var(--success-color);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+        }
+        
+        .connection-point:hover {
+            transform: translateY(-50%) scale(1.2);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 25px;
+        }
+        
+        .loading.visible {
+            display: block;
+        }
+        
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4361ee;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .output-path-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            padding: 15px;
+            background: var(--light-bg);
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .output-path-group label {
+            font-weight: 500;
+            white-space: nowrap;
+            color: #555;
+        }
+        
+        .output-path-group input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: var(--transition);
+        }
+        
+        .output-path-group input:focus {
+            outline: none;
+            border-color: #4361ee;
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+        
+        /* 错误提示样式 */
+        .error-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--error-color);
+            color: white;
+            padding: 18px 24px;
+            border-radius: 10px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 450px;
+            animation: slideIn 0.3s ease-out;
+            border-left: 4px solid #b71c1c;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .mapping-area {
+                height: 200px;
+                min-width: auto;
+            }
+            
+            .excel-panel {
+                min-height: 400px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+            }
+            
+            .stat-item {
+                min-width: 100px;
+                padding: 10px 20px;
+            }
+            
+            .drop-zone {
+                margin: 15px;
+                min-height: 250px;
+            }
+            
+            .drop-zone-icon {
+                font-size: 48px;
+            }
+            
+            .drop-zone-text {
+                font-size: 16px;
+            }
+            
+            .control-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .legend {
+                margin-left: 0;
+                margin-top: 10px;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Excel数据转换工具</h1>
+            <p>拖拽上传文件，可视化字段映射，一键完成转换</p>
+
+        </div>
+        
+        <div class="instructions">
+            <strong>操作说明：</strong>
+            1. 将源数据Excel文件拖拽到左侧区域（或点击选择文件）
+            2. 将目标模板Excel文件拖拽到右侧区域
+            3. 点击源文件行数可预览前5行数据
+            4. 系统自动分析并建立字段映射，可手动调整映射关系
+            5. 点击源字段右侧圆点 → 点击目标字段左侧圆点，可手动建立映射
+            6. 点击映射线本身可删除该映射关系
+            7. 点击映射线中间的⚙按钮可配置字段值转换规则（如"已完税"→"超出免税部分"）
+            8. 已配置值转换规则的字段会显示🔄标记
+            9. 点击"保存配置"可保存当前映射关系，下次使用相同模板时自动加载
+            10. 点击"开始转换"，如有未保存的配置变更会提示保存
+        </div>
+        
+        <div class="main-content" id="mainContent">
+            <div class="excel-panel source-panel">
+                <div class="panel-header">
+                    <span>📁</span>
+                    <div class="panel-stats source-stats" id="sourceStatsPanel" style="display:none;">
+                        <span class="stat-item source-fields"><span class="value" id="sourceFieldCount">0</span> 源字段</span>
+                        <span class="stat-item source-mapped"><span class="value" id="sourceMappedCount">0</span> 已映射</span>
+                    </div>
+                    <span>源数据文件</span>
+                </div>
+                <div class="drop-zone" id="sourceDropZone">
+                    <div class="drop-zone-icon">📄</div>
+                    <div class="drop-zone-text">
+                        <strong>拖拽Excel文件到此处</strong><br>
+                        或点击选择文件
+                    </div>
+                    <input type="file" id="sourceFileInput" accept=".xlsx,.xls" style="display:none;">
+                </div>
+                <div class="loading" id="sourceLoading">
+                    <div class="loading-spinner"></div>
+                    <div>正在分析文件...</div>
+                </div>
+                <div class="table-container" id="sourceTableContainer">
+                    <ul class="field-list" id="sourceFields"></ul>
+                </div>
+
+            </div>
+            
+            <div class="mapping-area" id="mappingArea">
+                <div class="config-list-container" id="configListContainer">
+                    <div class="config-list-header">
+                        <label>🔧 配置：</label>
+                        <select class="config-select" id="configSelect" onchange="onConfigSelectChange()">
+                            <option value="">-- 选择配置 --</option>
+                        </select>
+                    </div>
+                    <div class="config-actions-row">
+                        <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
+                        <button class="btn btn-secondary btn-icon" onclick="importConfig()" title="导入配置">📥 导入</button>
+                        <button class="btn btn-secondary btn-icon" onclick="exportCurrentConfig()" id="exportConfigBtn" disabled title="导出配置">📤 导出</button>
+                        <button class="btn btn-danger btn-icon" onclick="deleteCurrentConfig()" id="deleteConfigBtn" disabled title="删除配置">🗑️ 删除</button>
+                    </div>
+                    <div class="config-info-bar" id="configInfoBar"></div>
+                    <div class="config-list" id="configList"></div>
+                </div>
+                <svg class="mapping-canvas" id="mappingCanvas"></svg>
+            </div>
+            
+            <div class="excel-panel target-panel">
+                <div class="panel-header">
+                    <span>📋</span>
+                    <div class="panel-stats" id="statsPanel" style="display:none;">
+                        <span class="stat-item total-fields"><span class="value" id="totalFields">0</span> 目标字段</span>
+                        <span class="stat-item mapped-fields"><span class="value" id="mappedFields">0</span> 已映射</span>
+                        <span class="stat-item missing-fields"><span class="value" id="missingFields">0</span> 缺失</span>
+                        <span class="stat-item required-missing"><span class="value" id="requiredMissing">0</span> 必填缺失</span>
+                    </div>
+                    <span>目标模板文件</span>
+                </div>
+                <div class="drop-zone" id="targetDropZone">
+                    <div class="drop-zone-icon">📄</div>
+                    <div class="drop-zone-text">
+                        <strong>拖拽Excel文件到此处</strong><br>
+                        或点击选择文件
+                    </div>
+                    <input type="file" id="targetFileInput" accept=".xlsx,.xls" style="display:none;">
+                </div>
+                <div class="loading" id="targetLoading">
+                    <div class="loading-spinner"></div>
+                    <div>正在分析文件...</div>
+                </div>
+                <div class="table-container" id="targetTableContainer">
+                    <ul class="field-list" id="targetFields"></ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls" id="controlsPanel" style="display:none;">
+            <div class="control-row">
+                <div class="filter-group">
+                    <label>显示映射线：</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" id="showHigh" checked> 高置信度</label>
+                        <label><input type="checkbox" id="showMedium" checked> 中置信度</label>
+                        <label><input type="checkbox" id="showLow"> 低置信度</label>
+                        <label><input type="checkbox" id="showManual" checked> 手动映射</label>
+                    </div>
+                </div>
+                
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-line high"></div> 高置信度</div>
+                    <div class="legend-item"><div class="legend-line medium"></div> 中置信度</div>
+                    <div class="legend-item"><div class="legend-line low"></div> 低置信度</div>
+                    <div class="legend-item"><div class="legend-line manual"></div> 手动映射</div>
+                </div>
+            </div>
+            
+            <div class="output-path-group">
+                <label>输出文件路径：</label>
+                <input type="text" id="outputPath" placeholder="留空则自动生成到源文件同目录">
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="resetMappings()">重置映射</button>
+                <button class="btn btn-danger" onclick="cancelTransform()">取消</button>
+                <button class="btn btn-success" id="transformBtn" onclick="confirmTransform()" disabled>开始转换</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <h3>✅ 确认执行转换？</h3>
+            <p id="confirmMessage">即将执行数据转换，请确认映射关系正确。</p>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" id="confirmSaveBtn" style="display:none;" onclick="saveAndTransform()">保存并转换</button>
+                <button class="btn btn-success" id="confirmDirectBtn" onclick="executeTransform()">确认执行</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="resultModal">
+        <div class="modal-content">
+            <h3 id="resultTitle">转换结果</h3>
+            <p id="resultMessage"></p>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="closeResultModal()">确定</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="valueTransformModal">
+        <div class="modal-content" style="min-width: 600px; max-width: 800px;">
+            <h3>🔄 字段值转换规则</h3>
+            <div style="margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+                <div style="display: flex; gap: 20px;">
+                    <div><strong>源字段:</strong> <span id="transformSourceField"></span></div>
+                    <div><strong>目标字段:</strong> <span id="transformTargetField"></span></div>
+                </div>
+            </div>
+            <div class="transform-rules-container">
+                <table class="transform-rules-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">转换类型</th>
+                            <th>源值/参数</th>
+                            <th>目标值/格式</th>
+                            <th style="width: 80px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transformRulesBody">
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('simple')">+ 添加简单替换</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('string')">+ 添加字符串处理</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('date')">+ 添加日期转换</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('number')">+ 添加数值处理</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('logic')">+ 添加逻辑运算</button>
+            </div>
+            <div style="margin-top: 15px; padding: 10px; background: #fff3e0; border-radius: 6px; font-size: 13px;">
+                <strong>提示:</strong> 未配置转换规则的值将保持原值不变
+            </div>
+            <div class="action-buttons" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeValueTransformModal()">取消</button>
+                <button class="btn btn-success" onclick="saveTransformRules()">确定</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="saveConfigModal">
+        <div class="modal-content">
+            <h3>💾 保存映射配置</h3>
+            <p style="margin: 15px 0;">
+                <input type="text" id="configName" placeholder="请输入配置名称" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            </p>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="closeSaveConfigModal()">取消</button>
+                <button class="btn btn-success" onclick="saveConfig()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="loadConfigModal">
+        <div class="modal-content" style="min-width: 400px;">
+            <h3>📂 加载映射配置</h3>
+            <div class="config-list" id="configList">
+                <p style="color: #666; text-align: center; padding: 20px;">暂无保存的配置</p>
+            </div>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="importConfig()">📥 导入配置</button>
+                <button class="btn btn-secondary" onclick="closeLoadConfigModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="addConfigModal">
+        <div class="modal-content" style="min-width: 400px;">
+            <h3>📝 新增映射配置</h3>
+            <p>没有找到所选文件字段所对应的映射配置，系统需要新增一个，就叫：</p>
+            <input type="text" id="newConfigName" placeholder="什么系统里下载的文件转成年金什么申请格式" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin: 15px 0;">
+            <div class="action-buttons">
+                <button class="btn btn-success" onclick="saveNewConfig()">保存配置</button>
+                <button class="btn btn-secondary" onclick="closeAddConfigModal()">暂不新增配置</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="dataPreviewModal">
+        <div class="modal-content" style="min-width: 800px; max-width: 95vw; max-height: 90vh; overflow: hidden;">
+            <h3 style="margin-bottom: 15px;">📊 数据预览（前5行）</h3>
+            <div id="dataPreviewModalContent" style="max-height: 60vh; overflow: auto; border: 1px solid #e0e0e0; border-radius: 8px;"></div>
+            <div class="action-buttons" style="margin-top: 20px;">
+                <button class="btn btn-primary" onclick="closeDataPreviewModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let sourceFile = null;
+        let targetFile = null;
+        let previewData = null;
+        let manualMappings = [];
+        let removedMappings = [];
+        let currentLoadedConfig = null;
+        let selectedSourceField = null;
+        let fieldElements = { source: {}, target: {} };
+        let valueTransformRules = {};
+        let currentTransformField = null;
+        let sourceSampleData = null;
+        let configHasChanges = false;
+        
+        function removeFile(type) {
+            try {
+                const dropZoneId = type === 'source' ? 'sourceDropZone' : 'targetDropZone';
+                const dropZone = document.getElementById(dropZoneId);
+                
+                if (!dropZone) {
+                    console.error('dropZone not found:', dropZoneId);
+                    return;
+                }
+                
+                const fileInfo = dropZone.nextElementSibling;
+                const tableContainerId = type === 'source' ? 'sourceTableContainer' : 'targetTableContainer';
+                const tableContainer = document.getElementById(tableContainerId);
+                
+                if (type === 'source') {
+                    sourceFile = null;
+                    sourceSampleData = null;
+                } else {
+                    targetFile = null;
+                }
+                
+                dropZone.style.display = 'flex';
+                
+                if (fileInfo && fileInfo.classList.contains('file-info')) {
+                    fileInfo.remove();
+                }
+                
+                if (tableContainer) {
+                    tableContainer.classList.remove('visible');
+                    const fieldListId = type === 'source' ? 'sourceFields' : 'targetFields';
+                    const fieldList = document.getElementById(fieldListId);
+                    if (fieldList) {
+                        fieldList.innerHTML = '';
+                    }
+                }
+                
+                fieldElements[type] = {};
+                
+                if (!sourceFile && !targetFile) {
+                    previewData = null;
+                    manualMappings = [];
+                    removedMappings = [];
+                    selectedSourceField = null;
+                    valueTransformRules = {};
+                    currentLoadedConfig = null;
+                    
+                    const statsPanel = document.getElementById('statsPanel');
+                    const sourceStatsPanel = document.getElementById('sourceStatsPanel');
+                    const controlsPanel = document.getElementById('controlsPanel');
+                    const mappingToolbar = document.getElementById('mappingToolbar');
+                    const outputPath = document.getElementById('outputPath');
+                    const transformBtn = document.getElementById('transformBtn');
+                    const saveConfigBtn = document.getElementById('saveConfigBtn');
+                    
+                    if (statsPanel) statsPanel.style.display = 'none';
+                    if (sourceStatsPanel) sourceStatsPanel.style.display = 'none';
+                    if (controlsPanel) controlsPanel.style.display = 'none';
+                    if (mappingToolbar) mappingToolbar.style.display = 'none';
+                    if (outputPath) outputPath.value = '';
+                    if (transformBtn) transformBtn.disabled = true;
+                    if (saveConfigBtn) saveConfigBtn.disabled = true;
+                    
+                    const canvas = document.getElementById('mappingCanvas');
+                    if (canvas) {
+                        canvas.innerHTML = '';
+                    }
+                }
+                
+                drawMappings();
+                showSuccess(`已删除${type === 'source' ? '源' : '目标'}文件`);
+            } catch (e) {
+                console.error('removeFile error:', e);
+                showError('删除文件失败：' + e.message);
+            }
+        }
+        
+        // 显示错误提示
+        // 显示错误提示
+        function showError(message) {
+            const errorElement = document.createElement('div');
+            errorElement.className = 'error-message';
+            errorElement.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 24px;">❌</span>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(errorElement);
+            
+            // 3秒后自动消失
+            setTimeout(() => {
+                errorElement.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    document.body.removeChild(errorElement);
+                }, 300);
+            }, 3000);
+        }
+        
+        // 显示成功提示
+        function showSuccess(message) {
+            const successElement = document.createElement('div');
+            successElement.className = 'success-message';
+            successElement.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: var(--success-color);
+                color: white;
+                padding: 18px 24px;
+                border-radius: 10px;
+                box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+                z-index: 1000;
+                max-width: 450px;
+                animation: slideIn 0.3s ease-out;
+                border-left: 4px solid #2e7d32;
+            `;
+            successElement.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 24px;">✅</span>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(successElement);
+            
+            // 3秒后自动消失
+            setTimeout(() => {
+                successElement.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    document.body.removeChild(successElement);
+                }, 300);
+            }, 3000);
+        }
+        
+        // 显示加载提示
+        function showLoading(message = '处理中...') {
+            const loadingElement = document.createElement('div');
+            loadingElement.className = 'loading-overlay';
+            loadingElement.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(255,255,255,0.9);
+                backdrop-filter: blur(5px);
+                z-index: 2000;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                animation: fadeIn 0.3s ease-out;
+            `;
+            loadingElement.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div style="margin-top: 20px; font-size: 16px; color: #333;">${message}</div>
+            `;
+            document.body.appendChild(loadingElement);
+            return loadingElement;
+        }
+        
+        // 隐藏加载提示
+        function hideLoading(loadingElement) {
+            if (loadingElement) {
+                loadingElement.style.animation = 'fadeIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    document.body.removeChild(loadingElement);
+                }, 300);
+            }
+        }
+        
+        function setupDropZone(zoneId, inputId, type) {
+            const zone = document.getElementById(zoneId);
+            const input = document.getElementById(inputId);
+            
+            zone.addEventListener('click', () => input.click());
+            
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+            
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0], type);
+                }
+            });
+            
+            input.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0], type);
+                }
+            });
+        }
+        
+        async function handleFile(file, type) {
+            if (!file.name.match(/\.(xlsx|xls)$/i)) {
+                showError('请上传Excel文件（.xlsx或.xls）');
+                return;
+            }
+            
+            const loadingId = type === 'source' ? 'sourceLoading' : 'targetLoading';
+            const dropZoneId = type === 'source' ? 'sourceDropZone' : 'targetDropZone';
+            const dropZone = document.getElementById(dropZoneId);
+            
+            // 显示加载状态
+            document.getElementById(loadingId).classList.add('visible');
+            dropZone.style.display = 'none';
+            
+            // 添加文件信息显示
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'file-info';
+            fileInfo.innerHTML = `
+                <span>📄</span>
+                <span class="file-name">${file.name}</span>
+                <span class="file-size">${(file.size / 1024).toFixed(1)} KB</span>
+                <span class="file-rows" id="${type}FileRows" style="color: #666; font-size: 13px; cursor: ${type === 'source' ? 'pointer' : 'default'};" ${type === 'source' ? 'onclick="openDataPreviewModal()"' : ''}>处理中...</span>
+                <span class="remove-file" onclick="removeFile('${type}')" style="color: var(--error-color); cursor: pointer; font-size: 20px; transition: var(--transition);">✕</span>
+            `;
+            dropZone.parentNode.insertBefore(fileInfo, dropZone.nextSibling);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('type', type);
+            
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (type === 'source') {
+                        sourceFile = file;
+                        renderSourceFields(result.data);
+                        // 更新源文件行数
+                        const sourceRowsElement = document.getElementById('sourceFileRows');
+                        if (sourceRowsElement) {
+                            sourceRowsElement.textContent = `${result.data.rowCount} 行数据`;
+                            sourceRowsElement.style.color = '#2e7d32';
+                            sourceRowsElement.style.cursor = 'pointer';
+                            sourceRowsElement.style.textDecoration = 'underline';
+                            sourceRowsElement.title = '点击查看数据预览';
+                        }
+                        showSuccess(`源文件 ${file.name} 上传成功！`);
+                    } else {
+                        targetFile = file;
+                        renderTargetFields(result.data);
+                        // 更新目标文件行数（目标模板通常只有表头）
+                        const targetRowsElement = document.getElementById('targetFileRows');
+                        if (targetRowsElement) {
+                            targetRowsElement.textContent = `1 行表头`;
+                            targetRowsElement.style.color = '#2e7d32';
+                        }
+                        showSuccess(`目标模板 ${file.name} 上传成功！`);
+                    }
+                    
+                    if (sourceFile && targetFile) {
+                        const loading = showLoading('正在分析文件并建立字段映射...');
+                        await analyzeAndMap();
+                        hideLoading(loading);
+                    }
+                } else {
+                    const errorMessage = result.error ? 
+                        (result.error.message || '文件分析失败') : 
+                        '文件分析失败';
+                    showError(errorMessage);
+                    dropZone.style.display = 'flex';
+                    if (fileInfo.parentNode) {
+                        fileInfo.parentNode.removeChild(fileInfo);
+                    }
+                }
+            } catch (error) {
+                showError('上传失败: ' + error.message);
+                dropZone.style.display = 'flex';
+                if (fileInfo.parentNode) {
+                    fileInfo.parentNode.removeChild(fileInfo);
+                }
+            } finally {
+                document.getElementById(loadingId).classList.remove('visible');
+            }
+        }
+        
+        // 将数字转换为Excel列字母（如1→A, 26→Z, 27→AA）
+        function numberToExcelColumn(num) {
+            let column = '';
+            while (num > 0) {
+                const remainder = (num - 1) % 26;
+                column = String.fromCharCode(65 + remainder) + column;
+                num = Math.floor((num - 1) / 26);
+            }
+            return column;
+        }
+        
+        function renderSourceFields(data) {
+            const container = document.getElementById('sourceTableContainer');
+            const list = document.getElementById('sourceFields');
+            
+            if (data.sampleData && data.sampleData.length > 0) {
+                sourceSampleData = data.sampleData;
+            }
+            
+            list.innerHTML = '';
+            fieldElements.source = {};
+            
+            data.headers.forEach((header, idx) => {
+                if (!header) return;
+                const li = document.createElement('li');
+                li.className = 'field-item';
+                li.dataset.index = idx;
+                li.dataset.name = header;
+                
+                const columnLetter = numberToExcelColumn(idx + 1);
+                
+                li.innerHTML = `
+                    <span class="field-index">${columnLetter}</span>
+                    <span class="field-name">${header}</span>
+                    <div class="connection-point" data-type="source" data-index="${idx}"></div>
+                `;
+                
+                list.appendChild(li);
+                fieldElements.source[idx] = li;
+            });
+            
+            container.classList.add('visible');
+            
+            setupConnectionPoints();
+        }
+        
+        function openDataPreviewModal() {
+            if (!sourceSampleData || sourceSampleData.length === 0) {
+                showError('暂无数据预览');
+                return;
+            }
+            
+            const content = document.getElementById('dataPreviewModalContent');
+            const headers = previewData ? previewData.sourceHeaders : [];
+            
+            let html = '<div class="data-preview-table-wrapper"><table class="data-preview-table"><thead><tr>';
+            headers.forEach(h => {
+                html += `<th title="${escapeHtml(h || '')}">${escapeHtml(h || '')}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            sourceSampleData.slice(0, 5).forEach(row => {
+                html += '<tr>';
+                headers.forEach((_, idx) => {
+                    const cell = row[idx];
+                    const cellText = String(cell !== undefined && cell !== null ? cell : '');
+                    const displayText = cellText.length > 30 ? cellText.substring(0, 30) + '...' : cellText;
+                    html += `<td title="${escapeHtml(cellText)}">${escapeHtml(displayText)}</td>`;
+                });
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table></div>';
+            content.innerHTML = html;
+            
+            document.getElementById('dataPreviewModal').classList.add('show');
+        }
+        
+        function closeDataPreviewModal() {
+            document.getElementById('dataPreviewModal').classList.remove('show');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ========== 值转换规则功能 ==========
+        
+        function openValueTransformModal(sourceIndex, targetIndex) {
+            currentTransformField = { sourceIndex, targetIndex };
+            
+            const sourceHeader = previewData.sourceHeaders[sourceIndex];
+            const targetHeader = previewData.targetHeaders[targetIndex];
+            
+            document.getElementById('transformSourceField').textContent = sourceHeader;
+            document.getElementById('transformTargetField').textContent = targetHeader;
+            
+            const rules = valueTransformRules[`${sourceIndex}_${targetIndex}`] || [];
+            renderTransformRules(rules);
+            
+            document.getElementById('valueTransformModal').classList.add('show');
+        }
+        
+        function closeValueTransformModal() {
+            document.getElementById('valueTransformModal').classList.remove('show');
+            currentTransformField = null;
+        }
+        
+        function renderTransformRules(rules) {
+            const tbody = document.getElementById('transformRulesBody');
+            
+            if (rules.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: #999; padding: 20px;">
+                            暂无转换规则，点击下方按钮添加
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tbody.innerHTML = rules.map((rule, idx) => {
+                const type = rule.type || 'simple';
+                let typeOptions = '';
+                let sourceInput = '';
+                let targetInput = '';
+                
+                // 转换类型选择
+                typeOptions = `
+                    <select onchange="updateTransformRule(${idx}, 'type', this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="simple" ${type === 'simple' ? 'selected' : ''}>简单替换</option>
+                        <option value="string" ${type === 'string' ? 'selected' : ''}>字符串处理</option>
+                        <option value="date" ${type === 'date' ? 'selected' : ''}>日期转换</option>
+                        <option value="number" ${type === 'number' ? 'selected' : ''}>数值处理</option>
+                        <option value="logic" ${type === 'logic' ? 'selected' : ''}>逻辑运算</option>
+                    </select>
+                `;
+                
+                // 根据类型生成不同的输入字段
+                switch (type) {
+                    case 'simple':
+                        sourceInput = `<input type="text" value="${escapeHtml(rule.source || '')}" onchange="updateTransformRule(${idx}, 'source', this.value)" placeholder="源值">`;
+                        targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="目标值">`;
+                        break;
+                    case 'string':
+                        sourceInput = `
+                            <select onchange="updateTransformRule(${idx}, 'operation', this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="substring" ${rule.operation === 'substring' ? 'selected' : ''}>截取字符串</option>
+                                <option value="replace" ${rule.operation === 'replace' ? 'selected' : ''}>替换字符串</option>
+                                <option value="trim" ${rule.operation === 'trim' ? 'selected' : ''}>去除空格</option>
+                                <option value="uppercase" ${rule.operation === 'uppercase' ? 'selected' : ''}>转为大写</option>
+                                <option value="lowercase" ${rule.operation === 'lowercase' ? 'selected' : ''}>转为小写</option>
+                            </select>
+                            ${rule.operation === 'substring' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="起始位置,长度 (如: 0,5)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
+                            ${rule.operation === 'replace' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="查找,替换 (如: a,b)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
+                        `;
+                        targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="默认值（可选）">`;
+                        break;
+                    case 'date':
+                        sourceInput = `<input type="text" value="${escapeHtml(rule.sourceFormat || '')}" onchange="updateTransformRule(${idx}, 'sourceFormat', this.value)" placeholder="源日期格式 (如: YYYY-MM-DD)">`;
+                        targetInput = `<input type="text" value="${escapeHtml(rule.targetFormat || '')}" onchange="updateTransformRule(${idx}, 'targetFormat', this.value)" placeholder="目标日期格式 (如: DD/MM/YYYY)">`;
+                        break;
+                    case 'number':
+                        sourceInput = `
+                            <select onchange="updateTransformRule(${idx}, 'operation', this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="round" ${rule.operation === 'round' ? 'selected' : ''}>四舍五入</option>
+                                <option value="floor" ${rule.operation === 'floor' ? 'selected' : ''}>向下取整</option>
+                                <option value="ceil" ${rule.operation === 'ceil' ? 'selected' : ''}>向上取整</option>
+                                <option value="fixed" ${rule.operation === 'fixed' ? 'selected' : ''}>保留小数</option>
+                            </select>
+                            ${rule.operation === 'fixed' ? `<input type="number" value="${rule.params || 2}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="小数位数" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
+                        `;
+                        targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="默认值（可选）">`;
+                        break;
+                    case 'logic':
+                        sourceInput = `
+                            <input type="text" value="${escapeHtml(rule.expression || '')}" onchange="updateTransformRule(${idx}, 'expression', this.value)" placeholder="逻辑表达式 (如: col0 < 20000101 ? '上世纪出生' : (col0 < 20100101 ? '00后' : (col0 < 20200101 ? '10后' : '02后')))" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                                <strong>提示:</strong> 可使用 col0, col1 等引用当前行的字段值，支持三元运算符实现多结果逻辑
+                            </div>
+                        `;
+                        targetInput = `
+                            <input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="默认值（可选）" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                        `;
+                        break;
+                }
+                
+                return `
+                    <tr>
+                        <td>${typeOptions}</td>
+                        <td>${sourceInput}</td>
+                        <td>${targetInput}</td>
+                        <td style="text-align: center;"><span class="delete-btn" onclick="removeTransformRule(${idx})">&times;</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        function addTransformRule(type = 'simple') {
+            const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
+            if (!valueTransformRules[key]) {
+                valueTransformRules[key] = [];
+            }
+            
+            let newRule = { type: type };
+            
+            switch (type) {
+                case 'simple':
+                    newRule.source = '';
+                    newRule.target = '';
+                    break;
+                case 'string':
+                    newRule.operation = 'trim';
+                    newRule.params = '';
+                    newRule.target = '';
+                    break;
+                case 'date':
+                    newRule.sourceFormat = '';
+                    newRule.targetFormat = '';
+                    break;
+                case 'number':
+                    newRule.operation = 'round';
+                    newRule.params = '';
+                    newRule.target = '';
+                    break;
+                case 'logic':
+                    newRule.expression = '';
+                    newRule.target = '';
+                    break;
+            }
+            
+            valueTransformRules[key].push(newRule);
+            renderTransformRules(valueTransformRules[key]);
+        }
+        
+        function updateTransformRule(idx, field, value) {
+            const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
+            if (valueTransformRules[key] && valueTransformRules[key][idx]) {
+                valueTransformRules[key][idx][field] = value;
+                // 如果类型改变，重新渲染规则
+                if (field === 'type') {
+                    renderTransformRules(valueTransformRules[key]);
+                }
+                // 如果操作改变，重新渲染规则
+                if (field === 'operation') {
+                    renderTransformRules(valueTransformRules[key]);
+                }
+            }
+        }
+        
+        function removeTransformRule(idx) {
+            const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
+            if (valueTransformRules[key]) {
+                valueTransformRules[key].splice(idx, 1);
+                renderTransformRules(valueTransformRules[key]);
+            }
+        }
+        
+        function saveTransformRules() {
+            const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
+            const rules = valueTransformRules[key] || [];
+            
+            // 过滤掉空规则
+            valueTransformRules[key] = rules.filter(r => {
+                switch (r.type) {
+                    case 'simple':
+                        return r.source && r.source.trim() !== '' && r.target && r.target.trim() !== '';
+                    case 'string':
+                        return r.operation;
+                    case 'date':
+                        return r.targetFormat && r.targetFormat.trim() !== '';
+                    case 'number':
+                        return r.operation;
+                    case 'logic':
+                        return r.expression && r.expression.trim() !== '';
+                    default:
+                        return false;
+                }
+            });
+            
+            // 更新字段显示
+            updateFieldTransformIndicator(currentTransformField.sourceIndex, currentTransformField.targetIndex);
+            
+            closeValueTransformModal();
+        }
+        
+        function updateFieldTransformIndicator(sourceIndex, targetIndex) {
+            const key = `${sourceIndex}_${targetIndex}`;
+            const rules = valueTransformRules[key];
+            const sourceEl = fieldElements.source[sourceIndex];
+            
+            if (sourceEl) {
+                // 移除旧的指示器
+                const oldIndicator = sourceEl.querySelector('.transform-indicator');
+                if (oldIndicator) oldIndicator.remove();
+                
+                // 如果有规则，添加指示器
+                if (rules && rules.length > 0) {
+                    const indicator = document.createElement('span');
+                    indicator.className = 'transform-indicator';
+                    indicator.textContent = `🔄${rules.length}`;
+                    indicator.title = `已配置 ${rules.length} 条值转换规则`;
+                    indicator.onclick = (e) => {
+                        e.stopPropagation();
+                        openValueTransformModal(sourceIndex, targetIndex);
+                    };
+                    sourceEl.appendChild(indicator);
+                }
+            }
+        }
+        
+        // ========== 值转换规则功能结束 ==========
+        
+        function renderTargetFields(data) {
+            const container = document.getElementById('targetTableContainer');
+            const list = document.getElementById('targetFields');
+            
+            list.innerHTML = '';
+            fieldElements.target = {};
+            
+            data.headers.forEach((header, idx) => {
+                if (!header) return;
+                const li = document.createElement('li');
+                li.className = 'field-item';
+                const isRequired = header.includes('*');
+                const cleanHeader = header.replace(/\*/g, '').trim();
+                
+                li.dataset.index = idx;
+                li.dataset.name = cleanHeader;
+                
+                const columnLetter = numberToExcelColumn(idx + 1);
+                
+                li.innerHTML = `
+                    <div class="connection-point" data-type="target" data-index="${idx}"></div>
+                    <span class="field-index">${columnLetter}</span>
+                    <span class="field-name">${cleanHeader}</span>
+                `;
+                
+                if (isRequired) {
+                    li.classList.add('required');
+                }
+                
+                list.appendChild(li);
+                fieldElements.target[idx] = li;
+            });
+            
+            container.classList.add('visible');
+            setupConnectionPoints();
+        }
+        
+        async function analyzeAndMap() {
+            try {
+                const response = await fetch('/api/analyze', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    previewData = result.data;
+                    updateMappingDisplay();
+                    document.getElementById('statsPanel').style.display = 'flex';
+                    document.getElementById('sourceStatsPanel').style.display = 'flex';
+                    document.getElementById('controlsPanel').style.display = 'block';
+                    document.getElementById('transformBtn').disabled = false;
+                    document.getElementById('saveConfigBtn').disabled = false;
+                    document.getElementById('outputPath').value = result.data.defaultOutputPath || '';
+                    setTimeout(drawMappings, 100);
+                    // 更新配置列表排序
+                    renderConfigList();
+                    
+                    // 寻找字段完全符合的最新配置
+                    const configs = getConfigs();
+                    let bestConfig = null;
+                    let bestMatchScore = 0;
+                    
+                    configs.forEach(config => {
+                        const sourceMatch = calculateMatchScore(config.sourceHeaders, previewData.sourceHeaders);
+                        const targetMatch = calculateMatchScore(config.targetHeaders, previewData.targetHeaders);
+                        const totalMatch = (sourceMatch + targetMatch) / 2;
+                        
+                        // 只考虑字段完全符合的配置
+                        if (sourceMatch === 1 && targetMatch === 1) {
+                            // 如果是更高的匹配度，或者匹配度相同但创建时间更晚
+                            if (totalMatch > bestMatchScore || (totalMatch === bestMatchScore && new Date(config.createdAt) > new Date(bestConfig?.createdAt || 0))) {
+                                bestConfig = config;
+                                bestMatchScore = totalMatch;
+                            }
+                        }
+                    });
+                    
+                    // 如果找到完全匹配的配置，弹出提示
+                    if (bestConfig) {
+                        const configDate = new Date(bestConfig.createdAt).toLocaleString('zh-CN');
+                        if (confirm(`所选文件与 ${configDate} 保存的配置 "${bestConfig.name}" 字段完全一致，是否使用此配置？`)) {
+                            loadConfig(bestConfig.id);
+                        }
+                    } else {
+                        showAddConfigModal();
+                    }
+                } else {
+                    showError('映射分析失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                showError('映射分析失败: ' + error.message);
+            }
+        }
+        
+        function updateMappingDisplay() {
+            if (!previewData) return;
+            
+            previewData.mappings.forEach(mapping => {
+                const targetEl = fieldElements.target[mapping.targetIndex];
+                if (targetEl) {
+                    targetEl.classList.add('mapped');
+                }
+            });
+            
+            previewData.missingFields.forEach(f => {
+                const targetEl = fieldElements.target[f.index];
+                if (targetEl) {
+                    targetEl.classList.add('missing');
+                }
+            });
+            
+            updateStats();
+        }
+        
+        function setupConnectionPoints() {
+            document.querySelectorAll('.connection-point').forEach(point => {
+                point.addEventListener('click', handleConnectionClick);
+            });
+        }
+        
+        function handleConnectionClick(e) {
+            e.stopPropagation();
+            const point = e.target;
+            const type = point.dataset.type;
+            const index = parseInt(point.dataset.index);
+            
+            if (type === 'source') {
+                document.querySelectorAll('.connection-point').forEach(p => p.classList.remove('active'));
+                point.classList.add('active');
+                selectedSourceField = index;
+            } else if (type === 'target' && selectedSourceField !== null) {
+                addManualMapping(selectedSourceField, index);
+                document.querySelectorAll('.connection-point').forEach(p => p.classList.remove('active'));
+                selectedSourceField = null;
+            }
+        }
+        
+        function addManualMapping(sourceIndex, targetIndex) {
+            const existingIdx = manualMappings.findIndex(m => m.target === targetIndex);
+            if (existingIdx >= 0) {
+                manualMappings.splice(existingIdx, 1);
+            }
+            
+            const removedIdx = removedMappings.findIndex(m => m.targetIndex === targetIndex);
+            if (removedIdx >= 0) {
+                removedMappings.splice(removedIdx, 1);
+            }
+            
+            manualMappings.push({
+                source: sourceIndex,
+                target: targetIndex
+            });
+            
+            const targetEl = fieldElements.target[targetIndex];
+            if (targetEl) {
+                targetEl.classList.remove('missing');
+                targetEl.classList.add('mapped');
+            }
+            
+            updateStats();
+            drawMappings();
+        }
+        
+        function removeMapping(targetIndex) {
+            const mapping = previewData.mappings.find(m => m.targetIndex === targetIndex);
+            if (mapping) {
+                removedMappings.push(mapping);
+            }
+            
+            const manualIdx = manualMappings.findIndex(m => m.target === targetIndex);
+            if (manualIdx >= 0) {
+                manualMappings.splice(manualIdx, 1);
+            }
+            
+            const targetEl = fieldElements.target[targetIndex];
+            if (targetEl) {
+                targetEl.classList.remove('mapped');
+                if (previewData.missingFields.some(f => f.index === targetIndex)) {
+                    targetEl.classList.add('missing');
+                }
+            }
+            
+            updateStats();
+            drawMappings();
+        }
+        
+        function updateStats() {
+            if (!previewData) return;
+            
+            const mappedCount = previewData.mappings.filter(m => 
+                !removedMappings.some(r => r.targetIndex === m.targetIndex)
+            ).length + manualMappings.length;
+            
+            const missingCount = previewData.missingFields.length - 
+                manualMappings.filter(m => previewData.missingFields.some(f => f.index === m.target)).length;
+            
+            const requiredMissing = previewData.missingRequiredFields.length - 
+                manualMappings.filter(m => {
+                    const header = previewData.targetHeaders[m.target];
+                    return header && header.includes('*');
+                }).length;
+            
+            // 更新目标模板文件统计
+            document.getElementById('totalFields').textContent = previewData.targetHeaders.filter(h => h).length;
+            document.getElementById('mappedFields').textContent = mappedCount;
+            document.getElementById('missingFields').textContent = Math.max(0, missingCount);
+            
+            const requiredMissingElement = document.getElementById('requiredMissing');
+            const requiredMissingValue = Math.max(0, requiredMissing);
+            requiredMissingElement.textContent = requiredMissingValue;
+            
+            // 根据值设置类名
+            requiredMissingElement.className = 'value';
+            if (requiredMissingValue === 0) {
+                requiredMissingElement.classList.add('zero');
+            } else {
+                requiredMissingElement.classList.add('non-zero');
+            }
+            
+            // 更新源数据文件统计
+            if (previewData.sourceHeaders) {
+                document.getElementById('sourceFieldCount').textContent = previewData.sourceHeaders.filter(h => h).length;
+                document.getElementById('sourceMappedCount').textContent = mappedCount;
+            }
+        }
+        
+        function drawMappings() {
+            if (!previewData) return;
+            
+            const canvas = document.getElementById('mappingCanvas');
+            const mappingArea = document.getElementById('mappingArea');
+            const mainContent = document.getElementById('mainContent');
+            
+            if (!canvas || !mappingArea || !mainContent) return;
+            
+            const containerRect = mainContent.getBoundingClientRect();
+            const mappingRect = mappingArea.getBoundingClientRect();
+            
+            canvas.setAttribute('width', mappingRect.width);
+            canvas.setAttribute('height', mappingRect.height);
+            canvas.innerHTML = '';
+            
+            const showHighEl = document.getElementById('showHigh');
+            const showMediumEl = document.getElementById('showMedium');
+            const showLowEl = document.getElementById('showLow');
+            const showManualEl = document.getElementById('showManual');
+            
+            if (!showHighEl || !showMediumEl || !showLowEl || !showManualEl) return;
+            
+            const showHigh = showHighEl.checked;
+            const showMedium = showMediumEl.checked;
+            const showLow = showLowEl.checked;
+            const showManual = showManualEl.checked;
+            
+            document.querySelectorAll('.connection-point').forEach(p => p.classList.remove('connected'));
+            
+            previewData.mappings.forEach(mapping => {
+                if (removedMappings.some(r => r.targetIndex === mapping.targetIndex)) return;
+                if (manualMappings.some(m => m.target === mapping.targetIndex)) return;
+                
+                let showLine = false;
+                let lineClass = '';
+                
+                if (mapping.score >= 80 && showHigh) {
+                    showLine = true;
+                    lineClass = 'high';
+                } else if (mapping.score >= 50 && showMedium) {
+                    showLine = true;
+                    lineClass = 'medium';
+                } else if (mapping.score < 50 && showLow) {
+                    showLine = true;
+                    lineClass = 'low';
+                }
+                
+                if (showLine) {
+                    drawLine(mapping.sourceIndex, mapping.targetIndex, lineClass, mapping.score, mappingRect, containerRect);
+                }
+            });
+            
+            if (showManual) {
+                manualMappings.forEach(mapping => {
+                    drawLine(mapping.source, mapping.target, 'manual', null, mappingRect, containerRect);
+                });
+            }
+            
+            canvas.onclick = function(e) {
+                const btnDiv = e.target.closest('[data-source-idx]');
+                if (btnDiv) {
+                    const sourceIdx = parseInt(btnDiv.dataset.sourceIdx);
+                    const targetIdx = parseInt(btnDiv.dataset.targetIdx);
+                    openValueTransformModal(sourceIdx, targetIdx);
+                }
+            };
+        }
+        
+        function drawLine(sourceIdx, targetIdx, lineClass, score, mappingRect, containerRect) {
+            const canvas = document.getElementById('mappingCanvas');
+            
+            const sourceEl = fieldElements.source[sourceIdx];
+            const targetEl = fieldElements.target[targetIdx];
+            
+            if (!sourceEl || !targetEl) return;
+            
+            const sourceRect = sourceEl.getBoundingClientRect();
+            const targetRect = targetEl.getBoundingClientRect();
+            
+            const x1 = sourceRect.right - containerRect.left;
+            const y1 = sourceRect.top + sourceRect.height / 2 - containerRect.top;
+            const x2 = targetRect.left - containerRect.left - mappingRect.width;
+            const y2 = targetRect.top + targetRect.height / 2 - containerRect.top;
+            
+            const midX = mappingRect.width / 2;
+            const midY = (y1 + y2) / 2;
+            
+            // 添加path
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M 0 ${y1} C ${mappingRect.width * 0.3} ${y1}, ${mappingRect.width * 0.7} ${y2}, ${mappingRect.width} ${y2}`);
+            path.setAttribute('class', `mapping-line ${lineClass}`);
+            path.style.pointerEvents = 'stroke';
+            path.dataset.targetIndex = targetIdx;
+            path.dataset.sourceIdx = sourceIdx;
+            path.dataset.midX = midX;
+            path.dataset.midY = midY;
+            path.style.cursor = 'pointer';
+            
+            // 添加悬停效果
+            path.addEventListener('mouseenter', () => {
+                path.style.strokeWidth = '4';
+                sourceEl.style.transform = 'translateX(10px)';
+                targetEl.style.transform = 'translateX(-10px)';
+            });
+            
+            path.addEventListener('mouseleave', () => {
+                path.style.strokeWidth = '2';
+                sourceEl.style.transform = 'translateX(0)';
+                targetEl.style.transform = 'translateX(0)';
+            });
+            
+            path.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm('确定要删除这条映射关系吗？')) {
+                    removeMapping(targetIdx);
+                }
+            });
+            canvas.appendChild(path);
+            
+            // 添加配置按钮（使用foreignObject嵌入HTML）
+            const foreignObj = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+            foreignObj.setAttribute('x', midX - 18);
+            foreignObj.setAttribute('y', midY - 18);
+            foreignObj.setAttribute('width', '36');
+            foreignObj.setAttribute('height', '36');
+            foreignObj.style.pointerEvents = 'none'; // 让foreignObject本身不阻止事件
+            
+            const btnDiv = document.createElement('div');
+            btnDiv.style.cssText = 'width:36px;height:36px;background:white;border:2px solid #667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;pointer-events:auto;transition:all 0.3s ease;';
+            btnDiv.textContent = '⚙';
+            btnDiv.dataset.sourceIdx = sourceIdx;
+            btnDiv.dataset.targetIdx = targetIdx;
+            
+            // 添加按钮悬停效果
+            btnDiv.addEventListener('mouseenter', () => {
+                btnDiv.style.transform = 'scale(1.1)';
+                btnDiv.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
+            });
+            
+            btnDiv.addEventListener('mouseleave', () => {
+                btnDiv.style.transform = 'scale(1)';
+                btnDiv.style.boxShadow = 'none';
+            });
+            
+            foreignObj.appendChild(btnDiv);
+            canvas.appendChild(foreignObj);
+            
+            if (score !== null) {
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', midX);
+                text.setAttribute('y', midY - 25);
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('class', 'line-label');
+                text.textContent = score >= 80 ? '高' : score >= 50 ? '中' : '低';
+                text.style.fontWeight = '600';
+                canvas.appendChild(text);
+            }
+            
+            const sourcePoint = sourceEl.querySelector('.connection-point');
+            const targetPoint = targetEl.querySelector('.connection-point');
+            if (sourcePoint) sourcePoint.classList.add('connected');
+            if (targetPoint) targetPoint.classList.add('connected');
+        }
+        
+        function resetMappings() {
+            manualMappings = [];
+            removedMappings = [];
+            updateMappingDisplay();
+            drawMappings();
+        }
+        
+        function cancelTransform() {
+            if (confirm('确定要取消转换吗？')) {
+                fetch('/api/cancel', { method: 'POST' })
+                    .then(() => {
+                        showResult('已取消', '转换已取消。');
+                    });
+            }
+        }
+        
+        function checkConfigHasChanges() {
+            if (!currentLoadedConfig) {
+                return manualMappings.length > 0 || Object.keys(valueTransformRules).length > 0;
+            }
+            
+            try {
+                const currentMappings = JSON.stringify([...manualMappings].sort((a, b) => (a.target || 0) - (b.target || 0)));
+                const savedMappings = JSON.stringify([...(currentLoadedConfig.manualMappings || [])].sort((a, b) => (a.target || 0) - (b.target || 0)));
+                
+                const currentRules = JSON.stringify(valueTransformRules);
+                const savedRules = JSON.stringify(currentLoadedConfig.valueTransformRules || {});
+                
+                return currentMappings !== savedMappings || currentRules !== savedRules;
+            } catch (e) {
+                console.error('checkConfigHasChanges error:', e);
+                return true;
+            }
+        }
+        
+        function confirmTransform() {
+            try {
+                if (checkConfigHasChanges()) {
+                    document.getElementById('confirmMessage').innerHTML = 
+                        '⚠️ 检测到配置有未保存的更改，是否在转换前保存配置？<br><br>选择"保存并转换"将保存当前配置后继续转换；<br>选择"直接转换"将不保存配置直接转换；<br>选择"取消"返回继续编辑。';
+                    document.getElementById('confirmSaveBtn').style.display = 'inline-block';
+                    document.getElementById('confirmDirectBtn').textContent = '直接转换';
+                } else {
+                    const requiredMissing = parseInt(document.getElementById('requiredMissing').textContent);
+                    if (requiredMissing > 0) {
+                        document.getElementById('confirmMessage').textContent = 
+                            `⚠️ 警告：仍有 ${requiredMissing} 个必填字段缺失，转换结果可能不完整。是否继续？`;
+                    } else {
+                        document.getElementById('confirmMessage').textContent = 
+                            '所有必填字段均已映射，即将执行数据转换。';
+                    }
+                    document.getElementById('confirmSaveBtn').style.display = 'none';
+                    document.getElementById('confirmDirectBtn').textContent = '确认执行';
+                }
+                document.getElementById('confirmModal').classList.add('show');
+            } catch (e) {
+                console.error('confirmTransform error:', e);
+                alert('操作失败：' + e.message);
+            }
+        }
+        
+        function closeModal() {
+            document.getElementById('confirmModal').classList.remove('show');
+        }
+        
+        function saveAndTransform() {
+            closeModal();
+            openSaveConfigModal(true);
+        }
+        
+        function executeTransform() {
+            closeModal();
+            
+            const outputPath = document.getElementById('outputPath').value.trim();
+            
+            // 过滤掉空的转换规则
+            const cleanedRules = {};
+            Object.keys(valueTransformRules).forEach(key => {
+                const rules = valueTransformRules[key].filter(r => {
+                    switch (r.type) {
+                        case 'simple':
+                            return r.source && r.source.trim() !== '' && r.target && r.target.trim() !== '';
+                        case 'string':
+                            return r.operation;
+                        case 'date':
+                            return r.targetFormat && r.targetFormat.trim() !== '';
+                        case 'number':
+                            return r.operation;
+                        case 'logic':
+                            return r.expression && r.expression.trim() !== '';
+                        default:
+                            return false;
+                    }
+                });
+                if (rules.length > 0) {
+                    cleanedRules[key] = rules;
+                }
+            });
+            
+            const loading = showLoading('正在执行数据转换，请稍候...');
+            
+            fetch('/api/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    manualMappings: manualMappings,
+                    removedMappings: removedMappings,
+                    outputPath: outputPath,
+                    valueTransformRules: cleanedRules
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading(loading);
+                if (data.success) {
+                    showSuccess(`成功转换 ${data.dataRowCount} 行数据！`);
+                    showResult('✅ 转换完成', 
+                        `成功转换 ${data.dataRowCount} 行数据\n输出文件: ${data.outputFile}\n文件大小: ${data.fileSize}`);
+                } else {
+                    showError(data.error || '转换失败');
+                    showResult('❌ 转换失败', data.error || '未知错误');
+                }
+            })
+            .catch(error => {
+                hideLoading(loading);
+                showError('请求失败: ' + error.message);
+                showResult('❌ 请求失败', error.message);
+            });
+        }
+        
+        function showResult(title, message) {
+            document.getElementById('resultTitle').textContent = title;
+            document.getElementById('resultMessage').textContent = message;
+            document.getElementById('resultModal').classList.add('show');
+        }
+        
+        function closeResultModal() {
+            document.getElementById('resultModal').classList.remove('show');
+        }
+        
+        // ========== 配置管理功能 ==========
+        
+        const CONFIG_STORAGE_KEY = 'excel_transform_configs';
+        
+        function getConfigs() {
+            try {
+                const data = localStorage.getItem(CONFIG_STORAGE_KEY);
+                return data ? JSON.parse(data) : [];
+            } catch (e) {
+                return [];
+            }
+        }
+        
+        function saveConfigs(configs) {
+            try {
+                localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(configs));
+                return true;
+            } catch (e) {
+                console.error('保存配置失败:', e);
+                return false;
+            }
+        }
+        
+        let pendingTransformAfterSave = false;
+        
+        function openSaveConfigModal(transformAfterSave = false) {
+            pendingTransformAfterSave = transformAfterSave;
+            if (currentLoadedConfig) {
+                document.getElementById('configName').value = currentLoadedConfig.name;
+            } else {
+                document.getElementById('configName').value = '';
+            }
+            document.getElementById('saveConfigModal').classList.add('show');
+            document.getElementById('configName').focus();
+        }
+        
+        function closeSaveConfigModal() {
+            document.getElementById('saveConfigModal').classList.remove('show');
+            pendingTransformAfterSave = false;
+        }
+        
+        function saveConfig() {
+            const name = document.getElementById('configName').value.trim();
+            if (!name) {
+                alert('请输入配置名称');
+                return;
+            }
+            
+            if (!previewData) {
+                alert('请先完成字段映射');
+                return;
+            }
+            
+            const config = {
+                id: Date.now(),
+                name: name,
+                createdAt: new Date().toISOString(),
+                sourceHeaders: previewData.sourceHeaders,
+                targetHeaders: previewData.targetHeaders,
+                mappings: previewData.mappings.filter(m => 
+                    !removedMappings.some(r => r.targetIndex === m.targetIndex)
+                ),
+                manualMappings: [...manualMappings],
+                valueTransformRules: valueTransformRules
+            };
+            
+            const configs = getConfigs();
+            
+            const existingIndex = configs.findIndex(c => c.name === name);
+            if (existingIndex >= 0) {
+                if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
+                    return;
+                }
+                configs[existingIndex] = config;
+            } else {
+                configs.unshift(config);
+            }
+            
+            if (saveConfigs(configs)) {
+                currentLoadedConfig = config;
+                showSuccess('配置保存成功！');
+                closeSaveConfigModal();
+                renderConfigList();
+                updateConfigButtons(true);
+                
+                if (pendingTransformAfterSave) {
+                    pendingTransformAfterSave = false;
+                    setTimeout(() => executeTransform(), 100);
+                }
+            } else {
+                alert('配置保存失败，请重试');
+            }
+        }
+        
+        function openLoadConfigModal() {
+            renderConfigList();
+            document.getElementById('loadConfigModal').classList.add('show');
+        }
+        
+        function closeLoadConfigModal() {
+            document.getElementById('loadConfigModal').classList.remove('show');
+        }
+        
+        function showAddConfigModal() {
+            document.getElementById('addConfigModal').classList.add('show');
+            document.getElementById('newConfigName').focus();
+        }
+        
+        function closeAddConfigModal() {
+            document.getElementById('addConfigModal').classList.remove('show');
+        }
+        
+        function saveNewConfig() {
+            const configName = document.getElementById('newConfigName').value.trim();
+            if (!configName) {
+                alert('请输入配置名称');
+                return;
+            }
+            
+            // 保存当前映射作为新配置
+            const newConfig = {
+                id: Date.now(),
+                name: configName,
+                createdAt: new Date().toISOString(),
+                sourceHeaders: previewData.sourceHeaders,
+                targetHeaders: previewData.targetHeaders,
+                mappings: previewData.mappings,
+                manualMappings: manualMappings,
+                valueTransformRules: valueTransformRules
+            };
+            const configs = getConfigs();
+            configs.unshift(newConfig);
+            saveConfigs(configs);
+            renderConfigList();
+            
+            // 高亮显示新配置
+            setTimeout(() => {
+                const configItems = document.querySelectorAll('.config-item');
+                configItems.forEach(item => {
+                    if (item.getAttribute('onclick').includes(`loadConfig(${newConfig.id})`)) {
+                        item.classList.add('selected');
+                    } else {
+                        item.classList.remove('selected');
+                    }
+                });
+            }, 100);
+            
+            closeAddConfigModal();
+            alert('配置保存成功！');
+        }
+        
+        function renderConfigList() {
+            let configs = getConfigs();
+            const selectEl = document.getElementById('configSelect');
+            const infoBar = document.getElementById('configInfoBar');
+            
+            selectEl.innerHTML = '<option value="">-- 选择配置 --</option>';
+            
+            if (configs.length === 0) {
+                infoBar.classList.remove('visible');
+                updateConfigButtons(false);
+                return;
+            }
+            
+            if (previewData) {
+                configs = configs.sort((a, b) => {
+                    const aSourceMatch = calculateMatchScore(a.sourceHeaders, previewData.sourceHeaders);
+                    const aTargetMatch = calculateMatchScore(a.targetHeaders, previewData.targetHeaders);
+                    const aTotalMatch = (aSourceMatch + aTargetMatch) / 2;
+                    
+                    const bSourceMatch = calculateMatchScore(b.sourceHeaders, previewData.sourceHeaders);
+                    const bTargetMatch = calculateMatchScore(b.targetHeaders, previewData.targetHeaders);
+                    const bTotalMatch = (bSourceMatch + bTargetMatch) / 2;
+                    
+                    if (aTotalMatch !== bTotalMatch) {
+                        return bTotalMatch - aTotalMatch;
+                    }
+                    
+                    return new Date(b.createdAt) - new Date(a.createdAt);
+                });
+            } else {
+                configs = configs.sort((a, b) => {
+                    return new Date(b.createdAt) - new Date(a.createdAt);
+                });
+            }
+            
+            configs.forEach(config => {
+                const option = document.createElement('option');
+                option.value = config.id;
+                option.textContent = config.name;
+                if (currentLoadedConfig && currentLoadedConfig.id === config.id) {
+                    option.selected = true;
+                }
+                selectEl.appendChild(option);
+            });
+            
+            updateConfigInfoBar();
+        }
+        
+        function onConfigSelectChange() {
+            const selectEl = document.getElementById('configSelect');
+            const configId = parseInt(selectEl.value);
+            
+            if (!configId) {
+                currentLoadedConfig = null;
+                updateConfigInfoBar();
+                updateConfigButtons(false);
+                return;
+            }
+            
+            loadConfig(configId);
+        }
+        
+        function updateConfigInfoBar() {
+            const infoBar = document.getElementById('configInfoBar');
+            const selectEl = document.getElementById('configSelect');
+            const configId = parseInt(selectEl.value);
+            
+            if (!configId) {
+                infoBar.classList.remove('visible');
+                return;
+            }
+            
+            const configs = getConfigs();
+            const config = configs.find(c => c.id === configId);
+            
+            if (!config) {
+                infoBar.classList.remove('visible');
+                return;
+            }
+            
+            const date = new Date(config.createdAt).toLocaleString('zh-CN');
+            let matchInfo = '';
+            
+            if (previewData) {
+                const sourceMatch = calculateMatchScore(config.sourceHeaders, previewData.sourceHeaders);
+                const targetMatch = calculateMatchScore(config.targetHeaders, previewData.targetHeaders);
+                const totalMatch = (sourceMatch + targetMatch) / 2;
+                matchInfo = ` | 匹配度: ${Math.round(totalMatch * 100)}%`;
+            }
+            
+            infoBar.innerHTML = `📅 ${date} | 源字段: ${config.sourceHeaders.length} | 目标字段: ${config.targetHeaders.length}${matchInfo}`;
+            infoBar.classList.add('visible');
+        }
+        
+        function updateConfigButtons(hasConfig) {
+            document.getElementById('exportConfigBtn').disabled = !hasConfig;
+            document.getElementById('deleteConfigBtn').disabled = !hasConfig;
+        }
+        
+        function exportCurrentConfig() {
+            const selectEl = document.getElementById('configSelect');
+            const configId = parseInt(selectEl.value);
+            if (configId) {
+                exportConfig(configId);
+            }
+        }
+        
+        function deleteCurrentConfig() {
+            const selectEl = document.getElementById('configSelect');
+            const configId = parseInt(selectEl.value);
+            if (configId) {
+                deleteConfig(configId);
+            }
+        }
+        
+        function loadConfig(configId) {
+            const configs = getConfigs();
+            const config = configs.find(c => c.id === configId);
+            
+            if (!config) {
+                alert('配置不存在');
+                return;
+            }
+            
+            if (!sourceFile || !targetFile) {
+                alert('请先上传源文件和目标模板');
+                return;
+            }
+            
+            const sourceMatch = calculateMatchScore(config.sourceHeaders, previewData.sourceHeaders);
+            const targetMatch = calculateMatchScore(config.targetHeaders, previewData.targetHeaders);
+            
+            if (sourceMatch < 0.7 || targetMatch < 0.7) {
+                if (!confirm(`当前文件与配置的匹配度较低（源: ${Math.round(sourceMatch * 100)}%, 目标: ${Math.round(targetMatch * 100)}%），是否仍要应用？`)) {
+                    return;
+                }
+            }
+            
+            manualMappings = [...config.manualMappings];
+            removedMappings = [];
+            valueTransformRules = config.valueTransformRules || {};
+            currentLoadedConfig = config;
+            
+            config.mappings.forEach(m => {
+                if (!manualMappings.some(mm => mm.target === m.targetIndex)) {
+                    if (m.score < 80) {
+                        removedMappings.push({ targetIndex: m.targetIndex });
+                    }
+                }
+            });
+            
+            updateStats();
+            drawMappings();
+            
+            Object.keys(valueTransformRules).forEach(key => {
+                const [sourceIndex, targetIndex] = key.split('_').map(Number);
+                updateFieldTransformIndicator(sourceIndex, targetIndex);
+            });
+            
+            document.getElementById('configSelect').value = configId;
+            updateConfigInfoBar();
+            updateConfigButtons(true);
+            
+            closeLoadConfigModal();
+            
+            showSuccess(`配置 "${config.name}" 已应用！`);
+        }
+        
+        function calculateMatchScore(headers1, headers2) {
+            if (!headers1 || !headers2 || headers1.length === 0 || headers2.length === 0) return 0;
+            
+            const set1 = new Set(headers1.filter(h => h).map(h => h.toLowerCase()));
+            const set2 = new Set(headers2.filter(h => h).map(h => h.toLowerCase()));
+            
+            let matchCount = 0;
+            set1.forEach(h => {
+                if (set2.has(h)) matchCount++;
+            });
+            
+            return matchCount / Math.max(set1.size, set2.size);
+        }
+        
+        function deleteConfig(configId) {
+            if (!confirm('确定要删除此配置吗？')) return;
+            
+            const configs = getConfigs().filter(c => c.id !== configId);
+            saveConfigs(configs);
+            
+            if (currentLoadedConfig && currentLoadedConfig.id === configId) {
+                currentLoadedConfig = null;
+            }
+            
+            renderConfigList();
+            showSuccess('配置已删除');
+        }
+        
+        function exportConfig(configId) {
+            const configs = getConfigs();
+            const config = configs.find(c => c.id === configId);
+            
+            if (!config) {
+                alert('配置不存在');
+                return;
+            }
+            
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${config.name}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        function importConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const config = JSON.parse(event.target.result);
+                        
+                        if (!config.name || !config.mappings) {
+                            showError('无效的配置文件');
+                            return;
+                        }
+                        
+                        config.id = Date.now();
+                        config.createdAt = new Date().toISOString();
+                        
+                        const configs = getConfigs();
+                        configs.unshift(config);
+                        saveConfigs(configs);
+                        
+                        renderConfigList();
+                        showSuccess('配置导入成功！');
+                    } catch (err) {
+                        showError('配置文件解析失败: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+        
+        // ========== 配置管理功能结束 ==========
+        
+        document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', drawMappings);
+        });
+        
+        window.addEventListener('resize', drawMappings);
+        
+        document.querySelectorAll('.table-container').forEach(container => {
+            container.addEventListener('scroll', drawMappings);
+        });
+        
+        setupDropZone('sourceDropZone', 'sourceFileInput', 'source');
+        setupDropZone('targetDropZone', 'targetFileInput', 'target');
+        
+        // 初始化配置管理
+        renderConfigList();
+    </script>
+</body>
+</html>

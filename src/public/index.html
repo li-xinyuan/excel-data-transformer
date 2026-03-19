@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel数据转换工具</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Excel数据转换工具</h1>
+            <p>拖拽上传文件，可视化字段映射，一键完成转换</p>
+
+        </div>
+        
+        <div class="steps-bar">
+            <div class="step-item" id="step1" title="点击或拖拽上传您的源数据Excel文件">
+                <span class="step-number">①</span>
+                <span class="step-text">上传源数据文件</span>
+            </div>
+            <div class="step-arrow">→</div>
+            <div class="step-item" id="step2" title="点击或拖拽上传目标模板Excel文件">
+                <span class="step-number">②</span>
+                <span class="step-text">上传目标模板文件</span>
+            </div>
+            <div class="step-arrow">→</div>
+            <div class="step-item" id="step3" title="检查字段映射是否正确，可手动调整">
+                <span class="step-number">③</span>
+                <span class="step-text">检查/调整字段映射</span>
+            </div>
+            <div class="step-arrow">→</div>
+            <div class="step-item" id="step4" title="确认映射关系后开始转换">
+                <span class="step-number">④</span>
+                <span class="step-text">开始转换</span>
+            </div>
+        </div>
+        
+        <div class="instructions" id="quickGuide" title="点击查看完整帮助">
+            <strong>💡 快速指南：</strong>
+            <span id="quickGuideText">请上传您需要转换的源数据文件，该文件应包含目标模板所需的所有字段列。支持拖拽或点击选择文件上传。</span>
+        </div>
+        
+        <div class="main-content" id="mainContent">
+            <svg class="mapping-canvas" id="mappingCanvas"></svg>
+            <div class="excel-panel source-panel">
+                <div class="panel-header">
+                    <span>📁</span>
+                    <div class="panel-stats source-stats" id="sourceStatsPanel" style="display:none;">
+                        <span class="stat-item source-fields"><span class="value" id="sourceFieldCount">0</span> 源字段</span>
+                        <span class="stat-item source-mapped"><span class="value" id="sourceMappedCount">0</span> 已映射</span>
+                    </div>
+                    <span>源数据文件</span>
+                </div>
+                <div class="drop-zone" id="sourceDropZone">
+                    <div class="drop-zone-icon">📄</div>
+                    <div class="drop-zone-text">
+                        <strong>拖拽Excel文件到此处</strong><br>
+                        或点击选择文件
+                    </div>
+                    <input type="file" id="sourceFileInput" accept=".xlsx,.xls" style="display:none;">
+                </div>
+                <div class="loading" id="sourceLoading">
+                    <div class="loading-spinner"></div>
+                    <div>正在分析文件...</div>
+                </div>
+                <div class="table-container" id="sourceTableContainer">
+                    <ul class="field-list" id="sourceFields"></ul>
+                </div>
+
+            </div>
+            
+            <div class="mapping-area" id="mappingArea">
+                <div class="mapping-controls" id="mappingControls">
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-line high"></div> 高置信度</div>
+                        <div class="legend-item"><div class="legend-line medium"></div> 中置信度</div>
+                        <div class="legend-item"><div class="legend-line low"></div> 低置信度</div>
+                        <div class="legend-item"><div class="legend-line manual"></div> 手动映射</div>
+                    </div>
+                    <div class="mapping-hint">💡 手动映射：先点击源字段蓝色圆点，变红后，再点击目标字段圆点即可建立连线；点击连线可删除映射；点击连线中的⚙可设置转换规则。</div>
+                </div>
+            </div>
+
+            <div class="excel-panel target-panel">
+                <div class="panel-header">
+                    <span>📋</span>
+                    <div class="panel-stats" id="statsPanel" style="display:none;">
+                        <span class="stat-item total-fields"><span class="value" id="totalFields">0</span> 目标字段</span>
+                        <span class="stat-item mapped-fields"><span class="value" id="mappedFields">0</span> 已映射</span>
+                        <span class="stat-item required-missing"><span class="value" id="requiredMissing">0</span> 必填缺失</span>
+                    </div>
+                    <span>目标模板文件</span>
+                </div>
+                <div class="drop-zone" id="targetDropZone">
+                    <div class="drop-zone-icon">📄</div>
+                    <div class="drop-zone-text">
+                        <strong>拖拽Excel文件到此处</strong><br>
+                        或点击选择文件
+                    </div>
+                    <input type="file" id="targetFileInput" accept=".xlsx,.xls" style="display:none;">
+                </div>
+                <div class="loading" id="targetLoading">
+                    <div class="loading-spinner"></div>
+                    <div>正在分析文件...</div>
+                </div>
+                <div class="table-container" id="targetTableContainer">
+                    <ul class="field-list" id="targetFields"></ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls" id="controlsPanel" style="display:none;">
+            <div class="controls-section config-section">
+                <div class="config-row">
+                    <div class="config-selector">
+                        <label>🔧 配置：</label>
+                        <select class="config-select" id="configSelect" onchange="onConfigSelectChange()">
+                            <option value="">-- 选择配置 --</option>
+                        </select>
+                    </div>
+                    <div class="config-actions-inline">
+                        <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
+                        <button class="btn btn-secondary btn-icon" onclick="importConfig()" title="导入配置">📥 导入</button>
+                        <button class="btn btn-secondary btn-icon" onclick="exportCurrentConfig()" id="exportConfigBtn" disabled title="导出配置">📤 导出</button>
+                        <button class="btn btn-danger btn-icon" onclick="deleteCurrentConfig()" id="deleteConfigBtn" disabled title="删除配置">🗑️ 删除</button>
+                    </div>
+                </div>
+                <div class="config-info-bar" id="configInfoBar"></div>
+            </div>
+            <div class="controls-section action-section">
+                <button class="btn btn-success btn-large" id="transformBtn" onclick="confirmTransform()" disabled>🔄 开始转换</button>
+            </div>
+        </div>
+    
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <h3>✅ 确认执行转换？</h3>
+            <p id="confirmMessage">即将执行数据转换，请确认映射关系正确。</p>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" id="confirmSaveBtn" style="display:none;" onclick="saveAndTransform()">保存并转换</button>
+                <button class="btn btn-success" id="confirmDirectBtn" onclick="executeTransform()">确认执行</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="resultModal">
+        <div class="modal-content">
+            <h3 id="resultTitle">转换结果</h3>
+            <p id="resultMessage"></p>
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="closeResultModal()">确定</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="valueTransformModal">
+        <div class="modal-content" style="min-width: 600px; max-width: 800px;">
+            <h3>🔄 字段值转换规则</h3>
+            <div style="margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+                <div style="display: flex; gap: 20px;">
+                    <div><strong>源字段:</strong> <span id="transformSourceField"></span></div>
+                    <div><strong>目标字段:</strong> <span id="transformTargetField"></span></div>
+                </div>
+            </div>
+            <div class="transform-rules-container">
+                <table class="transform-rules-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">转换类型</th>
+                            <th>源值/参数</th>
+                            <th>目标值/格式</th>
+                            <th style="width: 80px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transformRulesBody">
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('simple')">+ 添加简单替换</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('string')">+ 添加字符串处理</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('date')">+ 添加日期转换</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('number')">+ 添加数值处理</button>
+                <button class="btn btn-secondary btn-sm" onclick="addTransformRule('logic')">+ 添加逻辑运算</button>
+            </div>
+            <div style="margin-top: 15px; padding: 10px; background: #fff3e0; border-radius: 6px; font-size: 13px;">
+                <strong>提示:</strong> 未配置转换规则的值将保持原值不变
+            </div>
+            <div class="action-buttons" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeValueTransformModal()">取消</button>
+                <button class="btn btn-success" onclick="saveTransformRules()">确定</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="saveConfigModal">
+        <div class="modal-content">
+            <h3>💾 保存映射配置</h3>
+            <p style="margin: 15px 0;">
+                <input type="text" id="configName" placeholder="请输入配置名称" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+            </p>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="closeSaveConfigModal()">取消</button>
+                <button class="btn btn-success" onclick="saveConfig()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="loadConfigModal">
+        <div class="modal-content" style="min-width: 400px;">
+            <h3>📂 加载映射配置</h3>
+            <div class="config-list" id="configList">
+                <p style="color: #666; text-align: center; padding: 20px;">暂无保存的配置</p>
+            </div>
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="importConfig()">📥 导入配置</button>
+                <button class="btn btn-secondary" onclick="closeLoadConfigModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="addConfigModal">
+        <div class="modal-content" style="min-width: 400px;">
+            <h3>📝 新增映射配置</h3>
+            <p>没有找到所选文件字段所对应的映射配置，系统需要新增一个，就叫：</p>
+            <input type="text" id="newConfigName" placeholder="什么系统里下载的文件转成年金什么申请格式" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin: 15px 0;">
+            <div class="action-buttons">
+                <button class="btn btn-success" onclick="saveNewConfig()">保存配置</button>
+                <button class="btn btn-secondary" onclick="closeAddConfigModal()">暂不新增配置</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="dataPreviewModal">
+        <div class="modal-content" style="min-width: 800px; max-width: 95vw; max-height: 90vh; overflow: hidden;">
+            <h3 style="margin-bottom: 15px;">📊 数据预览（前5行）</h3>
+            <div id="dataPreviewModalContent" style="max-height: 60vh; overflow: auto; border: 1px solid #e0e0e0; border-radius: 8px;"></div>
+            <div class="action-buttons" style="margin-top: 20px;">
+                <button class="btn btn-primary" onclick="closeDataPreviewModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
