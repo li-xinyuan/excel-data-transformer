@@ -37,26 +37,29 @@ npm install
 
 ## 使用方法
 
-### 方式一：命令行启动
+### 方式一：使用启动脚本
 
 ```bash
 # Windows
-start.bat "源数据文件路径.xlsx" "目标模板文件路径.xlsx"
+双击运行 start.bat
 
 # macOS / Linux
-./start.sh "源数据文件路径.xlsx" "目标模板文件路径.xlsx"
-
-# 或直接使用 node
-node transform_excel.js "源数据文件路径.xlsx" "目标模板文件路径.xlsx"
+./start.sh
 ```
 
-### 方式二：直接运行
+### 方式二：命令行启动
+
+```bash
+node transform_excel.js
+```
+
+### 方式三：开发模式
 
 ```bash
 node src/index.js
 ```
 
-然后在浏览器中打开显示的地址，通过界面上传文件。
+启动后，在浏览器中打开显示的地址（默认 http://localhost:3456），通过界面上传文件。
 
 ## 操作说明
 
@@ -83,23 +86,26 @@ excel-data-transformer/
 │   ├── index.js          # 入口文件
 │   ├── server.js         # Web 服务器
 │   ├── fieldMapper.js    # 字段映射逻辑
-│   ├── excelHandler.js   # Excel 处理
-│   ├── config.js         # 配置管理
+│   ├── excelParser.js    # Excel 解析
+│   ├── dataTransformer.js # 数据转换
+│   ├── config/           # 配置管理
+│   ├── utils/            # 工具函数
 │   └── public/
 │       ├── index.html    # 主页面
 │       ├── js/
 │       │   └── app.js    # 前端逻辑
 │       └── css/
 │           └── style.css # 样式文件
+├── tests/                # 测试文件
 ├── transform_excel.js    # 主程序入口
 ├── package.json          # 项目配置
 ├── README.md             # 使用说明
 ├── CHANGELOG.md          # 更新日志
 ├── start.bat             # Windows 启动脚本
 ├── start.sh              # macOS/Linux 启动脚本
-└── examples/             # 示例文件（可选）
-    ├── sample_source.xlsx
-    └── sample_target.xlsx
+├── Dockerfile            # Docker 配置
+├── docker-compose.yml    # Docker Compose 配置
+└── ecosystem.config.js   # PM2 配置
 ```
 
 ## 版本历史
@@ -160,3 +166,5 @@ A: 点击连线中间的⚙按钮，在弹出的窗口中添加转换规则。
 ## 技术支持
 
 如有问题，请联系开发者或提交 Issue。
+
+GitHub: https://github.com/li-xinyuan/excel-data-transformer
