@@ -1,3 +1,33 @@
+        // Session 管理
+        let sessionId = null;
+        
+        // 从 Cookie 中获取 Session ID
+        function getSessionIdFromCookie() {
+            const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+                const [key, value] = cookie.trim().split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+            return cookies['sessionId'];
+        }
+        
+        // 初始化 Session
+        function initSession() {
+            sessionId = getSessionIdFromCookie();
+            if (sessionId) {
+                console.log('恢复 Session:', sessionId);
+            }
+        }
+        
+        // 从响应头获取 Session ID
+        function updateSessionFromResponse(xhr) {
+            const newSessionId = xhr.getResponseHeader('X-Session-Id');
+            if (newSessionId && newSessionId !== sessionId) {
+                sessionId = newSessionId;
+                console.log('更新 Session:', sessionId);
+            }
+        }
+        
         let sourceFile = null;
         let targetFile = null;
         let previewData = null;
@@ -11,6 +41,9 @@
         let currentTransformField = null;
         let sourceSampleData = null;
         let configHasChanges = false;
+        
+        // 初始化 Session
+        initSession();
         
         function updateSteps() {
             const step1 = document.getElementById('step1');
@@ -348,6 +381,9 @@
                     body: formData,
                     signal: uploadAbortController.signal
                 });
+                
+                // 更新 Session
+                updateSessionFromResponse(response);
                 
                 const result = await response.json();
                 

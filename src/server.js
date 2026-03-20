@@ -28,7 +28,8 @@ const {
 const { analyzeSourceFile, analyzeTargetTemplate } = require('./excelParser');
 const { buildFieldMapping, previewTransformation, applyManualMappings } = require('./fieldMapper');
 const { transformData, buildOutputRows, writeOutputFile } = require('./dataTransformer');
-const { sessionContext } = require('./sessionContext');
+const { sessionManager } = require('./sessionContext');
+const { sessionMiddleware, setSessionCookie } = require('./middleware/session');
 
 function startWebServer() {
     return new Promise((resolve, reject) => {
@@ -43,6 +44,9 @@ function startWebServer() {
                     res.end();
                     return;
                 }
+                
+                // 应用 Session 中间件
+                sessionMiddleware(req, res);
                 
                 if (req.url === '/api/upload' && req.method === 'POST') {
                     handleFileUpload(req, res);
@@ -60,7 +64,7 @@ function startWebServer() {
                     req.on('end', () => {
                         try {
                             const data = JSON.parse(body);
-                            sessionContext.setConfigName(data.configName || '默认配置');
+                            req.session.setConfigName(data.configName || '默认配置');
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ success: true }));
                         } catch (e) {
@@ -77,10 +81,19 @@ function startWebServer() {
                 }
                 
                 if (req.url === '/api/cancel' && req.method === 'POST') {
-                    sessionContext.transformConfirmed = false;
+                    req.session.transformConfirmed = false;
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ success: true }));
-                    resolve({ cancelled: true });
+                    return;
+                }
+                
+                if (req.url === '/api/session' && req.method === 'GET') {
+                    // 获取当前 Session 信息
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        sessionId: req.sessionId,
+                        sessionCount: sessionManager.getSessionCount()
+                    }));
                     return;
                 }
                 
@@ -114,16 +127,12 @@ function startWebServer() {
         const port = config.server.port;
         server.listen(port, () => {
             logger.info({ port }, 'Web server started');
-            console.log(`\n  🌐 Web界面已启动: http://localhost:${port}`);
+            console.log(`\n  🌐 Web 界面已启动：http://localhost:${port}`);
             console.log('  请在浏览器中打开上述地址进行操作\n');
         });
         
         server.on('close', () => {
-            if (!sessionContext.transformConfirmed) {
-                resolve({ cancelled: true });
-            } else {
-                resolve(sessionContext.transformResult);
-            }
+            logger.info('服务器关闭');
         });
     });
 }
@@ -179,59 +188,12 @@ async function handleFileUpload(req, res) {
                     return;
                 }
                 
-                const validExtensions = config.file.upload.allowedExtensions;
-                if (!validateFileType(file.originalFilename, validExtensions)) {
+                // 验证文件类型
+                if (!validateFileType(file.originalFilename, ['xlsx', 'xls'])) {
                     const error = createError(
                         ERROR_TYPES.FILE_UPLOAD,
                         ERROR_CODES.INVALID_FILE_TYPE,
                         ERROR_MESSAGES.INVALID_FILE_TYPE
-                    );
-                    logErrorHandler(error, { url: req.url, method: req.method, filename: file.originalFilename });
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(formatErrorResponse(error)));
-                    return;
-                }
-                
-                const maxFileSize = 100 * 1024 * 1024;
-                if (!validateFileSize(file.size, maxFileSize)) {
-                    const error = createError(
-                        ERROR_TYPES.FILE_UPLOAD,
-                        ERROR_CODES.FILE_TOO_LARGE,
-                        ERROR_MESSAGES.FILE_TOO_LARGE
-                    );
-                    logErrorHandler(error, { url: req.url, method: req.method, filename: file.originalFilename, fileSize: file.size });
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(formatErrorResponse(error)));
-                    return;
-                }
-                
-                const sanitizedFileType = sanitizeInput(fileType);
-                if (!['source', 'target'].includes(sanitizedFileType)) {
-                    const error = createError(
-                        ERROR_TYPES.FILE_UPLOAD,
-                        ERROR_CODES.FILE_PARSE_ERROR,
-                        '无效的文件类型参数'
-                    );
-                    logErrorHandler(error, { url: req.url, method: req.method, fileType: fileType });
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(formatErrorResponse(error)));
-                    return;
-                }
-                
-                console.log('File type:', sanitizedFileType);
-                console.log('File name:', file.originalFilename);
-                console.log('File content length:', file.size);
-                logger.debug({ fileType: sanitizedFileType, fileName: file.originalFilename, fileSize: file.size }, 'File uploaded');
-                
-                let tempPath;
-                try {
-                    tempPath = safeJoin(__dirname, '..', `${config.file.upload.tempPrefix}${sanitizedFileType}_${Date.now()}.xlsx`);
-                } catch (pathError) {
-                    const error = createError(
-                        ERROR_TYPES.FILE_UPLOAD,
-                        ERROR_CODES.FILE_PARSE_ERROR,
-                        '无效的文件路径',
-                        pathError.message
                     );
                     logErrorHandler(error, { url: req.url, method: req.method });
                     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -239,119 +201,132 @@ async function handleFileUpload(req, res) {
                     return;
                 }
                 
-                try {
-                    const readStream = fs.createReadStream(file.filepath);
-                    const writeStream = fs.createWriteStream(tempPath);
-                    
-                    await new Promise((resolve, reject) => {
-                        readStream.on('error', reject);
-                        writeStream.on('error', reject);
-                        writeStream.on('finish', resolve);
-                        readStream.pipe(writeStream);
-                    });
-                } catch (fileError) {
+                // 验证文件大小
+                if (!validateFileSize(file.size, config.file.upload.maxSize)) {
                     const error = createError(
                         ERROR_TYPES.FILE_UPLOAD,
-                        ERROR_CODES.FILE_READ_ERROR,
-                        ERROR_MESSAGES.FILE_READ_ERROR,
-                        fileError.message
+                        ERROR_CODES.FILE_TOO_LARGE,
+                        ERROR_MESSAGES.FILE_TOO_LARGE
                     );
-                    logErrorHandler(error, { url: req.url, method: req.method, filename: file.originalFilename });
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(formatErrorResponse(error)));
-                    return;
-                }
-                
-                try {
-                    if (sanitizedFileType === 'source') {
-                        const wb = XLSX.readFile(tempPath);
-                        const ws = wb.Sheets[wb.SheetNames[0]];
-                        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                        const analysis = analyzeSourceFile(data);
-                        sessionContext.setSourceAnalysis(analysis, tempPath);
-                        
-                        const sampleData = analysis.dataRows.slice(0, 5).map(row => {
-                            return analysis.dataHeaders.map((header, idx) => {
-                                return row[idx] !== undefined ? row[idx] : '';
-                            });
-                        });
-                        
-                        console.log(`源文件分析完成: ${analysis.dataHeaders.length} 列, ${analysis.dataRows.length} 行数据`);
-                        logger.info({ headers: analysis.dataHeaders.length, rows: analysis.dataRows.length }, 'Source file analyzed');
-                        
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({
-                            success: true,
-                            data: {
-                                headers: analysis.dataHeaders,
-                                rowCount: analysis.dataRows.length,
-                                sampleData: sampleData
-                            }
-                        }));
-                    } else if (sanitizedFileType === 'target') {
-                        const wb = XLSX.readFile(tempPath, { cellFormula: true });
-                        const sheetName = wb.SheetNames[0];
-                        const ws = wb.Sheets[sheetName];
-                        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                        
-                        const analysis = analyzeTargetTemplate(data, ws);
-                        sessionContext.setTargetAnalysis(analysis, data, wb, sheetName, tempPath);
-                        
-                        console.log(`目标模板分析完成: ${analysis.dataHeaders.length} 列`);
-                        logger.info({ headers: analysis.dataHeaders.length }, 'Target template analyzed');
-                        
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({
-                            success: true,
-                            data: {
-                                headers: analysis.dataHeaders
-                            }
-                        }));
-                    }
-                } catch (excelError) {
-                    const error = createError(
-                        ERROR_TYPES.EXCEL_PARSE,
-                        ERROR_CODES.INVALID_EXCEL_FILE,
-                        ERROR_MESSAGES.INVALID_EXCEL_FILE,
-                        excelError.message
-                    );
-                    logErrorHandler(error, { url: req.url, method: req.method, filename: file.originalFilename });
+                    logErrorHandler(error, { url: req.url, method: req.method });
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify(formatErrorResponse(error)));
                     return;
                 }
-            } catch (e) {
-                const error = createError(
-                    ERROR_TYPES.SYSTEM,
-                    ERROR_CODES.INTERNAL_ERROR,
-                    ERROR_MESSAGES.INTERNAL_ERROR,
-                    e.message
-                );
+                
+                // 创建临时文件
+                const tempDir = path.join(__dirname, '..', config.file.upload.tempDir);
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+                
+                const ext = path.extname(file.originalFilename);
+                const tempFilename = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}${ext}`;
+                const tempPath = path.join(tempDir, tempFilename);
+                
+                // 复制文件到临时目录
+                const oldData = fs.readFileSync(file.filepath);
+                fs.writeFileSync(tempPath, oldData);
+                
+                // 删除 formidable 创建的临时文件
+                fs.unlinkSync(file.filepath);
+                
+                logger.info({ 
+                    fileType, 
+                    originalFilename: file.originalFilename, 
+                    tempPath,
+                    sessionId: req.sessionId 
+                }, '文件上传成功');
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    filename: file.originalFilename,
+                    tempPath: tempPath,
+                    fileType: fileType
+                }));
+                
+                // 设置 Session Cookie
+                setSessionCookie(res, req.sessionId);
+            } catch (error) {
                 logErrorHandler(error, { url: req.url, method: req.method });
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(formatErrorResponse(error)));
             }
         });
-    } catch (e) {
-        const error = createError(
-            ERROR_TYPES.SYSTEM,
-            ERROR_CODES.INTERNAL_ERROR,
-            ERROR_MESSAGES.INTERNAL_ERROR,
-            e.message
-        );
+    } catch (error) {
         logErrorHandler(error, { url: req.url, method: req.method });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatErrorResponse(error)));
     }
 }
 
-function handleAnalyze(req, res) {
+async function handleAnalyze(req, res) {
     try {
-        if (!sessionContext.isReadyForMapping()) {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body);
+                const { filePath, type } = data;
+                
+                if (!filePath || !type) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.MISSING_PARAMETER,
+                        '缺少必要参数'
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                let analysis;
+                if (type === 'source') {
+                    analysis = await analyzeSourceFile(filePath);
+                    req.session.setSourceAnalysis(analysis, filePath);
+                    logger.info({ 
+                        sourceFile: filePath,
+                        sessionId: req.sessionId 
+                    }, '源文件分析完成');
+                } else if (type === 'target') {
+                    analysis = await analyzeTargetTemplate(filePath);
+                    const wb = XLSX.readFile(filePath);
+                    const sheetName = wb.SheetNames[0];
+                    const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+                    req.session.setTargetAnalysis(analysis, data, wb, sheetName, filePath);
+                    logger.info({ 
+                        targetFile: filePath,
+                        sessionId: req.sessionId 
+                    }, '目标模板分析完成');
+                }
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    analysis: analysis
+                }));
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+async function handleConfirm(req, res, server, resolvePromise) {
+    try {
+        if (!req.session.isReadyForMapping()) {
             const error = createError(
-                ERROR_TYPES.FIELD_MAPPING,
-                ERROR_CODES.MAPPING_FAILED,
-                '请先上传源文件和目标模板'
+                ERROR_TYPES.INVALID_STATE,
+                ERROR_CODES.INVALID_STATE,
+                '请先上传并分析源文件和目标模板'
             );
             logErrorHandler(error, { url: req.url, method: req.method });
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -359,155 +334,30 @@ function handleAnalyze(req, res) {
             return;
         }
         
-        try {
-            const mapping = buildFieldMapping(sessionContext.sourceAnalysis, sessionContext.targetAnalysis);
-            sessionContext.setMapping(mapping);
-            const preview = previewTransformation(sessionContext.sourceAnalysis, sessionContext.targetAnalysis, mapping);
-            
-            const previewData = {
-                sourceFile: path.basename(sessionContext.sourceFilePath),
-                targetFile: path.basename(sessionContext.targetFilePath),
-                sourceHeaders: sessionContext.sourceAnalysis.dataHeaders,
-                targetHeaders: sessionContext.targetAnalysis.dataHeaders,
-                mappings: mapping.columnMappings.map(m => ({
-                    sourceIndex: m.sourceIndex,
-                    targetIndex: m.targetIndex,
-                    sourceField: m.sourceField,
-                    targetField: m.targetField,
-                    score: m.score
-                })),
-                missingFields: preview.missingRequiredFields.concat(preview.missingOptionalFields),
-                missingRequiredFields: preview.missingRequiredFields,
-                autoGeneratedColumns: mapping.autoGeneratedColumns,
-                calculatedColumns: mapping.calculatedColumns,
-                summary: preview.summary
-            };
-            
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, data: previewData }));
-        } catch (mappingError) {
-            const error = createError(
-                ERROR_TYPES.FIELD_MAPPING,
-                ERROR_CODES.MAPPING_FAILED,
-                ERROR_MESSAGES.MAPPING_FAILED,
-                mappingError.message
-            );
-            logErrorHandler(error, { url: req.url, method: req.method });
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(formatErrorResponse(error)));
-        }
-    } catch (e) {
-        const error = createError(
-            ERROR_TYPES.SYSTEM,
-            ERROR_CODES.INTERNAL_ERROR,
-            ERROR_MESSAGES.INTERNAL_ERROR,
-            e.message
-        );
+        // 构建映射
+        const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
+        req.session.setMapping(mapping);
+        const preview = previewTransformation(req.session.sourceAnalysis, req.session.targetAnalysis, mapping);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            preview: preview,
+            sourceFile: path.basename(req.session.sourceFilePath),
+            targetFile: path.basename(req.session.targetFilePath),
+            sourceHeaders: req.session.sourceAnalysis.dataHeaders,
+            targetHeaders: req.session.targetAnalysis.dataHeaders,
+            mappings: mapping.mappings
+        }));
+        
+        logger.info({ sessionId: req.sessionId }, '映射确认完成');
+    } catch (error) {
         logErrorHandler(error, { url: req.url, method: req.method });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatErrorResponse(error)));
     }
 }
 
-function handleConfirm(req, res, server, resolve) {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-        try {
-            let data;
-            try {
-                data = JSON.parse(body);
-            } catch (parseError) {
-                const error = createError(
-                    ERROR_TYPES.SYSTEM,
-                    ERROR_CODES.INTERNAL_ERROR,
-                    '无效的请求数据',
-                    parseError.message
-                );
-                logErrorHandler(error, { url: req.url, method: req.method });
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(formatErrorResponse(error)));
-                return;
-            }
-            
-            const manualMappings = Array.isArray(data.manualMappings) ? data.manualMappings : [];
-            const removedMappings = Array.isArray(data.removedMappings) ? data.removedMappings : [];
-            const valueTransformRules = typeof data.valueTransformRules === 'object' ? data.valueTransformRules : {};
-            
-            try {
-                applyManualMappings(
-                    sessionContext.mapping,
-                    manualMappings,
-                    removedMappings,
-                    sessionContext.sourceAnalysis.dataHeaders,
-                    sessionContext.targetAnalysis.dataHeaders
-                );
-                
-                const transformedData = transformData(
-                    sessionContext.sourceAnalysis,
-                    sessionContext.targetAnalysis,
-                    sessionContext.mapping,
-                    valueTransformRules
-                );
-                const outputRows = buildOutputRows(
-                    sessionContext.targetAnalysis,
-                    transformedData,
-                    sessionContext.mapping,
-                    sessionContext.targetData
-                );
-                
-                const XLSX = require('xlsx');
-                const wb = XLSX.utils.book_new();
-                const ws = XLSX.utils.aoa_to_sheet(outputRows);
-                XLSX.utils.book_append_sheet(wb, ws, sessionContext.targetSheetName || 'Sheet1');
-                
-                const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-                const base64Data = buffer.toString('base64');
-                
-                const fileName = sessionContext.getOutputFileName();
-                const fileSizeKB = (buffer.length / 1024).toFixed(2);
-                
-                sessionContext.setTransformConfirmed({
-                    success: true,
-                    fileName: fileName,
-                    fileData: base64Data,
-                    fileSize: fileSizeKB + ' KB',
-                    dataRowCount: transformedData.dataRows.length
-                });
-                
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(sessionContext.transformResult));
-            } catch (transformError) {
-                const error = createError(
-                    ERROR_TYPES.DATA_TRANSFORM,
-                    ERROR_CODES.TRANSFORM_FAILED,
-                    ERROR_MESSAGES.TRANSFORM_FAILED,
-                    transformError.message
-                );
-                logErrorHandler(error, { url: req.url, method: req.method });
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(formatErrorResponse(error)));
-            }
-        } catch (e) {
-            const error = createError(
-                ERROR_TYPES.SYSTEM,
-                ERROR_CODES.INTERNAL_ERROR,
-                ERROR_MESSAGES.INTERNAL_ERROR,
-                e.message
-            );
-            logErrorHandler(error, { url: req.url, method: req.method });
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(formatErrorResponse(error)));
-        }
-    });
-}
-
-function cleanup() {
-    sessionContext.cleanup();
-}
-
 module.exports = {
-    startWebServer,
-    cleanup,
-    sessionContext
+    startWebServer
 };
