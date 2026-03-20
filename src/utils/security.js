@@ -5,7 +5,7 @@ const fs = require('fs');
 
 // 验证文件类型
 function validateFileType(filename, allowedExtensions) {
-    const ext = path.extname(filename).toLowerCase();
+    const ext = path.extname(filename).toLowerCase().slice(1); // 去掉开头的点
     return allowedExtensions.includes(ext);
 }
 

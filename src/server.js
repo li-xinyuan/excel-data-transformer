@@ -143,6 +143,8 @@ async function handleFileUpload(req, res) {
             keepExtensions: true,
             multiples: false,
             maxFileSize: config.file.upload.maxSize,
+            uploadDir: path.join(__dirname, '..', config.file.upload.tempDir),
+            createDirs: true,
         });
         
         form.parse(req, async (err, fields, files) => {
@@ -173,7 +175,16 @@ async function handleFileUpload(req, res) {
                 }
                 
                 const fileType = fields.type && fields.type[0] ? fields.type[0] : null;
-                const file = files.file && files.file[0] ? files.file[0] : null;
+                // formidable v3+ files.file 是数组
+                const file = Array.isArray(files.file) ? files.file[0] : files.file;
+                
+                logger.info({ 
+                    originalFilename: file?.originalFilename,
+                    ext: file?.originalFilename ? path.extname(file.originalFilename) : 'N/A',
+                    sessionId: req.sessionId,
+                    filesKeys: Object.keys(files),
+                    fileType
+                }, '文件上传信息');
                 
                 if (!file || !fileType) {
                     const error = createError(
@@ -214,22 +225,8 @@ async function handleFileUpload(req, res) {
                     return;
                 }
                 
-                // 创建临时文件
-                const tempDir = path.join(__dirname, '..', config.file.upload.tempDir);
-                if (!fs.existsSync(tempDir)) {
-                    fs.mkdirSync(tempDir, { recursive: true });
-                }
-                
-                const ext = path.extname(file.originalFilename);
-                const tempFilename = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}${ext}`;
-                const tempPath = path.join(tempDir, tempFilename);
-                
-                // 复制文件到临时目录
-                const oldData = fs.readFileSync(file.filepath);
-                fs.writeFileSync(tempPath, oldData);
-                
-                // 删除 formidable 创建的临时文件
-                fs.unlinkSync(file.filepath);
+                // formidable v3+ 已经自动保存文件到 uploadDir
+                const tempPath = file.filepath;
                 
                 logger.info({ 
                     fileType, 
@@ -238,16 +235,18 @@ async function handleFileUpload(req, res) {
                     sessionId: req.sessionId 
                 }, '文件上传成功');
                 
+                // 设置 Session Cookie
+                setSessionCookie(res, req.sessionId);
+                
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
                     success: true,
-                    filename: file.originalFilename,
-                    tempPath: tempPath,
-                    fileType: fileType
+                    data: {
+                        filename: file.originalFilename,
+                        tempPath: tempPath,
+                        fileType: fileType
+                    }
                 }));
-                
-                // 设置 Session Cookie
-                setSessionCookie(res, req.sessionId);
             } catch (error) {
                 logErrorHandler(error, { url: req.url, method: req.method });
                 res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -284,17 +283,22 @@ async function handleAnalyze(req, res) {
                 
                 let analysis;
                 if (type === 'source') {
-                    analysis = await analyzeSourceFile(filePath);
+                    // 先读取并解析 Excel 文件
+                    const wb = XLSX.readFile(filePath);
+                    const sheetName = wb.SheetNames[0];
+                    const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+                    analysis = await analyzeSourceFile(data);
                     req.session.setSourceAnalysis(analysis, filePath);
                     logger.info({ 
                         sourceFile: filePath,
                         sessionId: req.sessionId 
                     }, '源文件分析完成');
                 } else if (type === 'target') {
-                    analysis = await analyzeTargetTemplate(filePath);
+                    // 先读取并解析 Excel 文件
                     const wb = XLSX.readFile(filePath);
                     const sheetName = wb.SheetNames[0];
                     const data = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
+                    analysis = await analyzeTargetTemplate(data);
                     req.session.setTargetAnalysis(analysis, data, wb, sheetName, filePath);
                     logger.info({ 
                         targetFile: filePath,
@@ -303,9 +307,23 @@ async function handleAnalyze(req, res) {
                 }
                 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
+                // 序列化分析结果，排除不能序列化的字段
+                const serializableAnalysis = {
+                    totalRows: analysis.totalRows,
+                    titleRow: analysis.titleRow,
+                    titleText: analysis.titleText,
+                    columnHeaderRows: analysis.columnHeaderRows,
+                    dataHeaders: analysis.dataHeaders,
+                    dataStartRow: analysis.dataStartRow,
+                    dataEndRow: analysis.dataEndRow,
+                    dataRowCount: analysis.dataRowCount || 0,
+                    sampleData: analysis.sampleData,
+                    totalRow: analysis.totalRow,
+                    endRow: analysis.endRow
+                };
                 res.end(JSON.stringify({
                     success: true,
-                    analysis: analysis
+                    analysis: serializableAnalysis
                 }));
             } catch (error) {
                 logErrorHandler(error, { url: req.url, method: req.method });
@@ -334,23 +352,119 @@ async function handleConfirm(req, res, server, resolvePromise) {
             return;
         }
         
-        // 构建映射
-        const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
-        req.session.setMapping(mapping);
-        const preview = previewTransformation(req.session.sourceAnalysis, req.session.targetAnalysis, mapping);
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            success: true,
-            preview: preview,
-            sourceFile: path.basename(req.session.sourceFilePath),
-            targetFile: path.basename(req.session.targetFilePath),
-            sourceHeaders: req.session.sourceAnalysis.dataHeaders,
-            targetHeaders: req.session.targetAnalysis.dataHeaders,
-            mappings: mapping.mappings
-        }));
-        
-        logger.info({ sessionId: req.sessionId }, '映射确认完成');
+        // 解析请求体
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const requestData = JSON.parse(body);
+                
+                // 如果有 manualMappings，说明是执行转换
+                if (requestData.manualMappings) {
+                    // 设置配置名称
+                    if (requestData.configName) {
+                        req.session.setConfigName(requestData.configName);
+                    }
+                    
+                    // 执行数据转换
+                    const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
+                    
+                    // 合并手动映射
+                    if (requestData.manualMappings && requestData.manualMappings.length > 0) {
+                        requestData.manualMappings.forEach(mm => {
+                            const existingIndex = mapping.columnMappings.findIndex(cm => cm.targetIndex === mm.target);
+                            if (existingIndex >= 0) {
+                                mapping.columnMappings[existingIndex] = {
+                                    ...mapping.columnMappings[existingIndex],
+                                    sourceIndex: mm.source,
+                                    sourceField: req.session.sourceAnalysis.dataHeaders[mm.source]
+                                };
+                            } else {
+                                mapping.columnMappings.push({
+                                    targetField: req.session.targetAnalysis.dataHeaders[mm.target],
+                                    targetIndex: mm.target,
+                                    sourceField: req.session.sourceAnalysis.dataHeaders[mm.source],
+                                    sourceIndex: mm.source,
+                                    score: 100,
+                                    matchType: 'manual'
+                                });
+                            }
+                        });
+                    }
+                    
+                    // 删除移除的映射
+                    if (requestData.removedMappings && requestData.removedMappings.length > 0) {
+                        mapping.columnMappings = mapping.columnMappings.filter(cm => 
+                            !requestData.removedMappings.some(rm => rm.targetIndex === cm.targetIndex)
+                        );
+                    }
+                    
+                    // 应用值转换规则
+                    if (requestData.valueTransformRules && Object.keys(requestData.valueTransformRules).length > 0) {
+                        // TODO: 实现值转换规则的应用
+                    }
+                    
+                    // 构建输出数据
+                    const outputRows = buildOutputRows(
+                        req.session.targetAnalysis,
+                        req.session.sourceAnalysis,
+                        mapping,
+                        req.session.targetData
+                    );
+                    
+                    // 写入输出文件
+                    const wb = writeOutputFile(
+                        outputRows,
+                        req.session.targetAnalysis.sheetName,
+                        req.session.targetFilePath,
+                        req.session.targetAnalysis
+                    );
+                    
+                    // 生成输出文件名
+                    const fileName = req.session.getOutputFileName();
+                    
+                    // 将 Excel 文件转换为 Buffer
+                    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+                    
+                    // 转换为 base64
+                    const fileData = buffer.toString('base64');
+                    
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        fileData: fileData,
+                        fileName: fileName,
+                        fileSize: (buffer.length / 1024).toFixed(1) + ' KB',
+                        dataRowCount: outputRows.length
+                    }));
+                    
+                    logger.info({ sessionId: req.sessionId, rowCount: outputRows.length }, '数据转换完成');
+                    return;
+                }
+                
+                // 否则返回映射预览
+                const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
+                req.session.setMapping(mapping);
+                const preview = previewTransformation(req.session.sourceAnalysis, req.session.targetAnalysis, mapping);
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    preview: preview,
+                    sourceFile: path.basename(req.session.sourceFilePath),
+                    targetFile: path.basename(req.session.targetFilePath),
+                    sourceHeaders: req.session.sourceAnalysis.dataHeaders,
+                    targetHeaders: req.session.targetAnalysis.dataHeaders,
+                    mappings: mapping.columnMappings
+                }));
+                
+                logger.info({ sessionId: req.sessionId }, '映射确认完成');
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
     } catch (error) {
         logErrorHandler(error, { url: req.url, method: req.method });
         res.writeHead(500, { 'Content-Type': 'application/json' });

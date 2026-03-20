@@ -25,7 +25,8 @@ function analyzeSourceFile(data) {
         dataRows: [],
         allRows: data,
         totalRow: -1,
-        totalRowData: null
+        totalRowData: null,
+        dataRowCount: 0
     };
     
     const headerKeywords = config.excel.headerKeywords;
@@ -117,6 +118,12 @@ function analyzeSourceFile(data) {
             result.dataEndRow = data.length - 1;
         }
     }
+    
+    // 计算数据行数
+    result.dataRowCount = result.dataRows.length;
+    
+    // 提取前 5 行样本数据用于预览
+    result.sampleData = result.dataRows.slice(0, 5);
     
     return result;
 }

@@ -1,5 +1,6 @@
         // Session 管理
         let sessionId = null;
+        let sourceFileAnalysis = null;
         
         // 从 Cookie 中获取 Session ID
         function getSessionIdFromCookie() {
@@ -20,8 +21,8 @@
         }
         
         // 从响应头获取 Session ID
-        function updateSessionFromResponse(xhr) {
-            const newSessionId = xhr.getResponseHeader('X-Session-Id');
+        function updateSessionFromResponse(response) {
+            const newSessionId = response.headers.get('X-Session-Id');
             if (newSessionId && newSessionId !== sessionId) {
                 sessionId = newSessionId;
                 console.log('更新 Session:', sessionId);
@@ -68,12 +69,12 @@
             targetDropZone.classList.remove('highlight');
             mainContent.classList.remove('has-overlay');
             
-            if (currentLoadedConfig) {
+            if (currentLoadedConfig && previewData) {
                 step1.classList.add('completed');
                 step2.classList.add('completed');
                 
                 const mappedTargetIndices = new Set();
-                previewData.mappings.forEach(m => {
+                (previewData.mappings || []).forEach(m => {
                     if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
                         mappedTargetIndices.add(m.targetIndex);
                     }
@@ -98,7 +99,7 @@
                 }
             } else if (sourceFile && targetFile && previewData) {
                 const mappedTargetIndices = new Set();
-                previewData.mappings.forEach(m => {
+                (previewData.mappings || []).forEach(m => {
                     if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
                         mappedTargetIndices.add(m.targetIndex);
                     }
@@ -179,7 +180,6 @@
                     const statsPanel = document.getElementById('statsPanel');
                     const sourceStatsPanel = document.getElementById('sourceStatsPanel');
                     const controlsPanel = document.getElementById('controlsPanel');
-                    const mappingControls = document.getElementById('mappingControls');
                     const mappingToolbar = document.getElementById('mappingToolbar');
                     const transformBtn = document.getElementById('transformBtn');
                     const saveConfigBtn = document.getElementById('saveConfigBtn');
@@ -187,7 +187,6 @@
                     if (statsPanel) statsPanel.style.display = 'none';
                     if (sourceStatsPanel) sourceStatsPanel.style.display = 'none';
                     if (controlsPanel) controlsPanel.style.display = 'none';
-                    if (mappingControls) mappingControls.style.display = 'none';
                     if (mappingToolbar) mappingToolbar.style.display = 'none';
                     if (transformBtn) transformBtn.disabled = true;
                     if (saveConfigBtn) saveConfigBtn.disabled = true;
@@ -389,36 +388,72 @@
                 
                 if (result.success) {
                     uploadAbortController = null;
-                    if (type === 'source') {
-                        sourceFile = file;
-                        renderSourceFields(result.data);
-                        const sourceRowsElement = document.getElementById('sourceFileRows');
-                        if (sourceRowsElement) {
-                            sourceRowsElement.textContent = `${result.data.rowCount} 行数据`;
-                            sourceRowsElement.style.color = '#2e7d32';
-                            sourceRowsElement.style.cursor = 'pointer';
-                            sourceRowsElement.style.textDecoration = 'underline';
-                            sourceRowsElement.title = '点击查看数据预览';
-                        }
-                        showSuccess(`源文件 ${file.name} 上传成功！`);
-                    } else {
-                        targetFile = file;
-                        renderTargetFields(result.data);
-                        const targetRowsElement = document.getElementById('targetFileRows');
-                        if (targetRowsElement) {
-                            targetRowsElement.textContent = `1 行表头`;
-                            targetRowsElement.style.color = '#2e7d32';
-                        }
-                        showSuccess(`目标模板 ${file.name} 上传成功！`);
-                    }
                     
-                    updateSteps();
+                    console.log('上传成功，result:', result);
                     
-                    if (sourceFile && targetFile) {
-                        const loading = showLoading('正在分析文件并建立字段映射...');
-                        await analyzeAndMap();
-                        hideLoading(loading);
+                    // 上传成功后，调用 analyze 接口分析文件
+                    try {
+                        const analyzeResponse = await fetch('/api/analyze', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                filePath: result.data?.tempPath || result.tempPath,
+                                type: type
+                            })
+                        });
+                        
+                        const analyzeResult = await analyzeResponse.json();
+                        
+                        if (!analyzeResult.success) {
+                            throw new Error(analyzeResult.error?.message || '文件分析失败');
+                        }
+                        
+                        const analysis = analyzeResult.analysis;
+                        
+                        if (type === 'source') {
+                            sourceFile = file;
+                            sourceFileAnalysis = analysis;
+                            renderSourceFields({
+                                headers: analysis.dataHeaders,
+                                rowCount: analysis.dataRowCount,
+                                sampleData: analysis.sampleData
+                            });
+                            const sourceRowsElement = document.getElementById('sourceFileRows');
+                            if (sourceRowsElement) {
+                                sourceRowsElement.textContent = `${analysis.dataRowCount} 行数据`;
+                                sourceRowsElement.style.color = '#2e7d32';
+                                sourceRowsElement.style.cursor = 'pointer';
+                                sourceRowsElement.style.textDecoration = 'underline';
+                                sourceRowsElement.title = '点击查看数据预览';
+                            }
+                            showSuccess(`源文件 ${file.name} 上传成功！`);
+                        } else {
+                            targetFile = file;
+                            renderTargetFields({
+                                headers: analysis.dataHeaders,
+                                rowCount: analysis.dataRowCount
+                            });
+                            const targetRowsElement = document.getElementById('targetFileRows');
+                            if (targetRowsElement) {
+                                targetRowsElement.textContent = `1 行表头`;
+                                targetRowsElement.style.color = '#2e7d32';
+                            }
+                            showSuccess(`目标模板 ${file.name} 上传成功！`);
+                        }
+                        
                         updateSteps();
+                        
+                        if (sourceFile && targetFile) {
+                            const loading = showLoading('正在分析文件并建立字段映射...');
+                            await analyzeAndMap();
+                            hideLoading(loading);
+                            updateSteps();
+                        }
+                    } catch (analyzeError) {
+                        showError('文件分析失败：' + analyzeError.message);
+                        resetFileUploadUI(type, dropZone, fileInfo);
                     }
                 } else {
                     const errorMessage = result.error ? 
@@ -514,7 +549,10 @@
             }
             
             const content = document.getElementById('dataPreviewModalContent');
-            const headers = previewData ? previewData.sourceHeaders : [];
+            // 优先使用 previewData 中的 headers，如果没有，使用 sourceFile 分析结果中的 headers
+            const headers = (previewData && previewData.sourceHeaders && previewData.sourceHeaders.length > 0) 
+                ? previewData.sourceHeaders 
+                : (sourceFileAnalysis && sourceFileAnalysis.dataHeaders ? sourceFileAnalysis.dataHeaders : []);
             
             let html = '<div class="data-preview-table-wrapper"><table class="data-preview-table"><thead><tr>';
             headers.forEach(h => {
@@ -524,17 +562,21 @@
             
             sourceSampleData.slice(0, 5).forEach(row => {
                 html += '<tr>';
-                headers.forEach((_, idx) => {
+                for (let idx = 0; idx < headers.length; idx++) {
                     const cell = row[idx];
                     const cellText = String(cell !== undefined && cell !== null ? cell : '');
                     const displayText = cellText.length > 30 ? cellText.substring(0, 30) + '...' : cellText;
                     html += `<td title="${escapeHtml(cellText)}">${escapeHtml(displayText)}</td>`;
-                });
+                }
                 html += '</tr>';
             });
             
             html += '</tbody></table></div>';
             content.innerHTML = html;
+            
+            console.log('Preview HTML generated, table rows:', sourceSampleData.length);
+            console.log('Preview headers:', headers);
+            console.log('Preview first row:', sourceSampleData[0]);
             
             document.getElementById('dataPreviewModal').classList.add('show');
         }
@@ -805,11 +847,21 @@
         
         async function analyzeAndMap() {
             try {
-                const response = await fetch('/api/analyze', { method: 'POST' });
+                // 两个文件都已上传并分析，直接调用 confirm 接口获取映射预览
+                const response = await fetch('/api/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
                 const result = await response.json();
                 
                 if (result.success) {
-                    previewData = result.data;
+                    previewData = {
+                        ...result.preview,
+                        mappings: result.mappings,
+                        sourceHeaders: result.sourceHeaders,
+                        targetHeaders: result.targetHeaders
+                    };
                     updateMappingDisplay();
                     document.getElementById('statsPanel').style.display = 'flex';
                     document.getElementById('sourceStatsPanel').style.display = 'flex';
@@ -846,7 +898,12 @@
                             loadConfig(bestConfig.id);
                         }
                     } else {
-                        showAddConfigModal();
+                        // 没有找到匹配的配置，自动建立字段名完全一样的映射
+                        autoMapExactMatches();
+                        // 弹出提示要新建配置
+                        setTimeout(() => {
+                            showAddConfigModal();
+                        }, 100);
                     }
                 } else {
                     showError('映射分析失败: ' + (result.error || '未知错误'));
@@ -856,13 +913,55 @@
             }
         }
         
+        function autoMapExactMatches() {
+            // 自动建立字段名完全一样的映射
+            const sourceHeaders = previewData.sourceHeaders || [];
+            const targetHeaders = previewData.targetHeaders || [];
+            
+            sourceHeaders.forEach((sourceField, sourceIndex) => {
+                if (!sourceField) return;
+                
+                const cleanSource = sourceField.replace(/\*/g, '').trim();
+                
+                // 在目标字段中查找完全匹配的
+                for (let targetIndex = 0; targetIndex < targetHeaders.length; targetIndex++) {
+                    const targetField = targetHeaders[targetIndex];
+                    if (!targetField) continue;
+                    
+                    const cleanTarget = targetField.replace(/\*/g, '').trim();
+                    
+                    // 字段名完全一样（去掉 * 后）
+                    if (cleanSource === cleanTarget) {
+                        // 检查是否已经存在映射
+                        const alreadyMapped = manualMappings.some(m => 
+                            m.source === sourceIndex || m.target === targetIndex
+                        );
+                        
+                        if (!alreadyMapped) {
+                            manualMappings.push({
+                                source: sourceIndex,
+                                target: targetIndex,
+                                sourceField: sourceField,
+                                targetField: targetField
+                            });
+                        }
+                        break;
+                    }
+                }
+            });
+            
+            // 更新映射显示
+            updateMappingDisplay();
+            setTimeout(drawMappings, 100);
+        }
+        
         function updateMappingDisplay() {
             if (!previewData) return;
             
             const mappedTargetIndices = new Set();
             const mappedSourceIndices = new Set();
             
-            previewData.mappings.forEach(mapping => {
+            (previewData.mappings || []).forEach(mapping => {
                 if (!removedMappings.some(r => r.targetIndex === mapping.targetIndex)) {
                     mappedTargetIndices.add(mapping.targetIndex);
                     mappedSourceIndices.add(mapping.sourceIndex);
@@ -1032,14 +1131,14 @@
         function updateStats() {
             if (!previewData) return;
             
-            const mappedCount = previewData.mappings.filter(m => 
+            const mappedCount = (previewData.mappings || []).filter(m => 
                 !removedMappings.some(r => r.targetIndex === m.targetIndex)
             ).length + manualMappings.length;
             
-            const missingCount = previewData.missingFields.length - 
-                manualMappings.filter(m => previewData.missingFields.some(f => f.index === m.target)).length;
+            const missingCount = (previewData.missingFields || []).length - 
+                manualMappings.filter(m => (previewData.missingFields || []).some(f => f.index === m.target)).length;
             
-            const mappedRequiredCount = previewData.mappings.filter(m => {
+            const mappedRequiredCount = (previewData.mappings || []).filter(m => {
                 if (removedMappings.some(r => r.targetIndex === m.targetIndex)) return false;
                 const header = previewData.targetHeaders[m.targetIndex];
                 return header && header.includes('*');
@@ -1096,7 +1195,7 @@
             
             document.querySelectorAll('.connection-point').forEach(p => p.classList.remove('connected'));
             
-            previewData.mappings.forEach(mapping => {
+            (previewData.mappings || []).forEach(mapping => {
                 if (removedMappings.some(r => r.targetIndex === mapping.targetIndex)) return;
                 if (manualMappings.some(m => m.target === mapping.targetIndex)) return;
                 
@@ -1286,7 +1385,22 @@
                     document.getElementById('confirmSaveBtn').style.display = 'inline-block';
                     document.getElementById('confirmDirectBtn').textContent = '直接转换';
                 } else {
-                    const requiredMissing = parseInt(document.getElementById('requiredMissing').textContent);
+                    // 重新计算必填字段映射情况
+                    const mappedTargetIndices = new Set();
+                    (previewData.mappings || []).forEach(m => {
+                        if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
+                            mappedTargetIndices.add(m.targetIndex);
+                        }
+                    });
+                    manualMappings.forEach(m => mappedTargetIndices.add(m.target));
+                    
+                    let requiredMissing = 0;
+                    document.querySelectorAll('.target-panel .field-item').forEach(el => {
+                        if (el.dataset.isRequired === 'true' && !mappedTargetIndices.has(parseInt(el.dataset.index))) {
+                            requiredMissing++;
+                        }
+                    });
+                    
                     if (requiredMissing > 0) {
                         document.getElementById('confirmMessage').textContent = 
                             `⚠️ 警告：仍有 ${requiredMissing} 个必填字段缺失，转换结果可能不完整。是否继续？`;
@@ -1347,7 +1461,8 @@
                 body: JSON.stringify({
                     manualMappings: manualMappings,
                     removedMappings: removedMappings,
-                    valueTransformRules: cleanedRules
+                    valueTransformRules: cleanedRules,
+                    configName: currentLoadedConfig ? currentLoadedConfig.name : null
                 })
             })
             .then(response => response.json())
@@ -1422,6 +1537,31 @@
         
         function openSaveConfigModal(transformAfterSave = false) {
             pendingTransformAfterSave = transformAfterSave;
+            
+            // 先检查必填字段映射情况
+            if (previewData) {
+                const mappedTargetIndices = new Set();
+                (previewData.mappings || []).forEach(m => {
+                    if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
+                        mappedTargetIndices.add(m.targetIndex);
+                    }
+                });
+                manualMappings.forEach(m => mappedTargetIndices.add(m.target));
+                
+                let unmappedRequiredCount = 0;
+                document.querySelectorAll('.target-panel .field-item').forEach(el => {
+                    if (el.dataset.isRequired === 'true' && !mappedTargetIndices.has(parseInt(el.dataset.index))) {
+                        unmappedRequiredCount++;
+                    }
+                });
+                
+                if (unmappedRequiredCount > 0) {
+                    if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射，您确认要保存么？`)) {
+                        return;
+                    }
+                }
+            }
+            
             if (currentLoadedConfig) {
                 document.getElementById('configName').value = currentLoadedConfig.name;
             } else {
@@ -1439,6 +1579,7 @@
         function saveConfig() {
             console.log('saveConfig function called');
             const name = document.getElementById('configName').value.trim();
+            console.log('Config name input:', name, 'type:', typeof name);
             if (!name) {
                 alert('请输入配置名称');
                 return;
@@ -1449,54 +1590,50 @@
                 return;
             }
             
-            const mappedTargetIndices = new Set();
-            previewData.mappings.forEach(m => {
-                if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
-                    mappedTargetIndices.add(m.targetIndex);
-                }
-            });
-            manualMappings.forEach(m => mappedTargetIndices.add(m.target));
-            
-            let unmappedRequiredCount = 0;
-            document.querySelectorAll('.target-panel .field-item').forEach(el => {
-                if (el.dataset.isRequired === 'true' && !mappedTargetIndices.has(parseInt(el.dataset.index))) {
-                    unmappedRequiredCount++;
-                }
-            });
-            
-            if (unmappedRequiredCount > 0) {
-                if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射，您确认要保存么？`)) {
-                    return;
-                }
-            }
-            
             const configs = getConfigs();
             const existingIndex = configs.findIndex(c => c.name === name);
+            console.log('existingIndex:', existingIndex);
             if (existingIndex >= 0) {
                 setTimeout(() => {
                     if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
                         return;
                     }
-                    doSaveConfig(name, existingIndex >= 0 ? configs[existingIndex].id : null);
+                    console.log('Saving with existing ID:', configs[existingIndex].id);
+                    doSaveConfig(name, configs[existingIndex].id);
                 }, 100);
                 return;
             }
             
+            console.log('Saving as new config with name:', name);
             doSaveConfig(name, null);
         }
         
         function doSaveConfig(name, existingId) {
             console.log('doSaveConfig called, name:', name, 'existingId:', existingId);
+            
+            if (!name) {
+                alert('配置名称不能为空');
+                return;
+            }
+            
             const config = {
                 id: existingId || Date.now(),
                 name: name,
                 createdAt: new Date().toISOString(),
                 sourceHeaders: previewData.sourceHeaders,
                 targetHeaders: previewData.targetHeaders,
-                mappings: previewData.mappings.filter(m => 
-                    !removedMappings.some(r => r.targetIndex === m.targetIndex)
-                ),
-                manualMappings: [...manualMappings],
+                mappings: (previewData.mappings || [])
+                    .filter(m => !removedMappings.some(r => r.targetIndex === m.targetIndex))
+                    .map(m => ({
+                        ...m,
+                        sourceField: m.sourceField || previewData.sourceHeaders[m.sourceIndex],
+                        targetField: m.targetField || previewData.targetHeaders[m.targetIndex]
+                    })),
+                manualMappings: manualMappings.map(m => ({
+                    ...m,
+                    sourceField: m.sourceField || previewData.sourceHeaders[m.source],
+                    targetField: m.targetField || previewData.targetHeaders[m.target]
+                })),
                 valueTransformRules: valueTransformRules
             };
             
@@ -1511,14 +1648,27 @@
             if (saveConfigs(configs)) {
                 currentLoadedConfig = config;
                 console.log('Calling loadConfig with config.id:', config.id, typeof config.id);
-                showSuccess('配置保存成功！');
+                showSuccess(`配置 "${name}" 保存成功！`);
+                
+                // 保存 pendingTransformAfterSave 的值，因为 closeSaveConfigModal 会重置它
+                const shouldTransform = pendingTransformAfterSave;
+                
                 closeSaveConfigModal();
+                
+                // 刷新配置列表
+                renderConfigList();
+                
+                // 设置选中刚保存的配置
+                const selectEl = document.getElementById('configSelect');
+                selectEl.value = String(config.id);
+                updateConfigInfoBar();
+                updateConfigButtons(true);
+                
                 loadConfig(config.id);
                 
                 updateSteps();
                 
-                if (pendingTransformAfterSave) {
-                    pendingTransformAfterSave = false;
+                if (shouldTransform) {
                     setTimeout(() => executeTransform(), 100);
                 }
             } else {
@@ -1557,7 +1707,7 @@
             
             if (!isNewConfig && previewData) {
                 const mappedTargetIndices = new Set();
-                previewData.mappings.forEach(m => {
+                (previewData.mappings || []).forEach(m => {
                     if (!removedMappings.some(r => r.targetIndex === m.targetIndex)) {
                         mappedTargetIndices.add(m.targetIndex);
                     }
@@ -1748,12 +1898,12 @@
                 }
             }
             
-            manualMappings = [...config.manualMappings];
+            manualMappings = [...(config.manualMappings || [])];
             removedMappings = [];
             valueTransformRules = config.valueTransformRules || {};
             currentLoadedConfig = config;
             
-            config.mappings.forEach(m => {
+            (config.mappings || []).forEach(m => {
                 if (!manualMappings.some(mm => mm.target === m.targetIndex)) {
                     if (m.score < 80) {
                         removedMappings.push({ targetIndex: m.targetIndex });

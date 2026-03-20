@@ -58,3 +58,6 @@ test-output/
 
 # Config files with sensitive data
 *.local.json
+
+# Uploads
+uploads/

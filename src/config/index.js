@@ -17,6 +17,7 @@ module.exports = {
     
     file: {
         upload: {
+            tempDir: 'uploads',
             maxSize: 100 * 1024 * 1024,
             allowedExtensions: ['.xlsx', '.xls'],
             tempPrefix: 'temp_',

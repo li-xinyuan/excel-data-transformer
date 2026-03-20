@@ -237,15 +237,30 @@ function transformData(source, target, mapping, valueRules) {
 
 function buildOutputRows(target, transformedData, mapping, originalTargetData) {
     const rows = [];
-    const maxCol = Math.max(...originalTargetData.map(row => row ? row.length : 0), target.dataHeaders.length);
+    const targetHeaders = target.dataHeaders || [];
+    const columnHeaderRows = target.columnHeaderRows || [];
     
-    const lastHeaderRow = target.columnHeaderRows.length > 0 
-        ? Math.max(...target.columnHeaderRows) 
+    console.log('buildOutputRows params:', {
+        targetHeaders: targetHeaders.length,
+        columnHeaderRows: columnHeaderRows.length,
+        originalTargetData: originalTargetData ? originalTargetData.length : 'undefined',
+        transformedData: transformedData ? 'exists' : 'undefined'
+    });
+    
+    if (!originalTargetData || !Array.isArray(originalTargetData)) {
+        console.error('originalTargetData is not an array:', originalTargetData);
+        originalTargetData = [];
+    }
+    
+    const maxCol = Math.max(...originalTargetData.map(row => row ? row.length : 0), targetHeaders.length);
+    
+    const lastHeaderRow = columnHeaderRows.length > 0 
+        ? Math.max(...columnHeaderRows) 
         : (target.dataStartRow > 0 ? target.dataStartRow - 1 : 0);
     
-    console.log(`  最后标题行: ${lastHeaderRow}`);
-    console.log(`  转换数据行数: ${transformedData.dataRows.length}`);
-    logger.debug({ lastHeaderRow, dataRows: transformedData.dataRows.length }, 'Building output rows');
+    console.log(`  最后标题行：${lastHeaderRow}`);
+    console.log(`  转换数据行数：${transformedData.dataRows ? transformedData.dataRows.length : 0}`);
+    logger.debug({ lastHeaderRow, dataRows: transformedData.dataRows ? transformedData.dataRows.length : 0 }, 'Building output rows');
     
     for (let row = 0; row <= lastHeaderRow; row++) {
         if (row === target.totalRow) continue;
@@ -253,10 +268,15 @@ function buildOutputRows(target, transformedData, mapping, originalTargetData) {
         const rowData = new Array(maxCol).fill('');
         const originalRow = originalTargetData[row] || [];
         
+        // 只复制表头行的原始内容（如标题、说明文字等），不复制数据
         for (let col = 0; col < originalRow.length; col++) {
-            rowData[col] = originalRow[col] !== undefined && originalRow[col] !== null 
-                ? originalRow[col]
-                : '';
+            // 如果是表头行（在数据开始行之前），复制原始内容
+            // 如果是数据行位置，保持为空
+            if (row < target.dataStartRow) {
+                rowData[col] = originalRow[col] !== undefined && originalRow[col] !== null 
+                    ? originalRow[col]
+                    : '';
+            }
         }
         
         rows.push(rowData);
@@ -282,9 +302,18 @@ function buildOutputRows(target, transformedData, mapping, originalTargetData) {
     
     transformedData.dataRows.forEach((row, idx) => {
         const rowData = new Array(maxCol).fill('');
-        for (let col = 0; col < Math.min(row.length, maxCol); col++) {
-            rowData[col] = row[col] !== undefined ? row[col] : '';
-        }
+        
+        // 根据映射关系填充数据
+        mapping.columnMappings.forEach(m => {
+            if (m.sourceIndex !== undefined && m.targetIndex !== undefined) {
+                const sourceValue = row[m.sourceIndex];
+                // 源字段为空时，目标字段也设置为空
+                rowData[m.targetIndex] = sourceValue !== undefined && sourceValue !== null 
+                    ? sourceValue
+                    : '';
+            }
+        });
+        
         rows.push(rowData);
     });
     
@@ -342,6 +371,8 @@ function writeOutputFile(outputRows, targetSheetName, outputPath, targetAnalysis
         const newWb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(newWb, newWs, targetSheetName);
         XLSX.writeFile(newWb, outputPath, { compression: true });
+        
+        return newWb;
     } catch (error) {
         // 检查错误类型
         if (error.code === 'ENOENT') {
