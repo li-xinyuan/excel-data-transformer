@@ -20,6 +20,78 @@
             }
         }
         
+        // ========== 控制面板拖拽功能 ==========
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let currentX = 0;
+        let currentY = 0;
+        
+        const controlsPanel = document.getElementById('controlsPanel');
+        const dragHandle = document.getElementById('dragHandle');
+        
+        if (dragHandle && controlsPanel) {
+            dragHandle.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                controlsPanel.classList.add('dragging');
+                
+                const rect = controlsPanel.getBoundingClientRect();
+                dragOffsetX = e.clientX - rect.left;
+                dragOffsetY = e.clientY - rect.top;
+                
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                const newX = e.clientX - dragOffsetX;
+                const newY = e.clientY - dragOffsetY;
+                
+                // 限制在视口范围内
+                const maxX = window.innerWidth - controlsPanel.offsetWidth;
+                const maxY = window.innerHeight - controlsPanel.offsetHeight;
+                
+                currentX = Math.max(0, Math.min(newX, maxX));
+                currentY = Math.max(0, Math.min(newY, maxY));
+                
+                controlsPanel.style.left = currentX + 'px';
+                controlsPanel.style.top = currentY + 'px';
+                controlsPanel.style.bottom = 'auto';
+                controlsPanel.style.transform = 'none';
+            });
+            
+            document.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    controlsPanel.classList.remove('dragging');
+                    
+                    // 保存位置到 localStorage
+                    localStorage.setItem('controlsPanelPosition', JSON.stringify({
+                        x: currentX,
+                        y: currentY
+                    }));
+                }
+            });
+            
+            // 恢复保存的位置
+            const savedPosition = localStorage.getItem('controlsPanelPosition');
+            if (savedPosition) {
+                try {
+                    const pos = JSON.parse(savedPosition);
+                    currentX = pos.x;
+                    currentY = pos.y;
+                    controlsPanel.style.left = currentX + 'px';
+                    controlsPanel.style.top = currentY + 'px';
+                    controlsPanel.style.bottom = 'auto';
+                    controlsPanel.style.transform = 'none';
+                } catch (e) {
+                    console.error('恢复控制面板位置失败:', e);
+                }
+            }
+        }
+        
         // 从响应头获取 Session ID
         function updateSessionFromResponse(response) {
             const newSessionId = response.headers.get('X-Session-Id');
@@ -57,11 +129,15 @@
             const targetDropZone = document.getElementById('targetDropZone');
             const quickGuideText = document.getElementById('quickGuideText');
             const mainContent = document.getElementById('mainContent');
+            const mappingHint = document.querySelector('.mapping-hint');
             
             step1.classList.remove('active', 'completed');
             step2.classList.remove('active', 'completed');
             step3.classList.remove('active', 'completed');
             step4.classList.remove('active', 'completed');
+            
+            // 移除闪烁效果
+            if (mappingHint) mappingHint.classList.remove('blink');
             
             sourcePanel.classList.remove('highlight-panel');
             targetPanel.classList.remove('highlight-panel');
@@ -92,6 +168,8 @@
                     step3.classList.add('active');
                     quickGuideText.textContent = `还有 ${unmappedRequiredCount} 个必填字段未映射，请继续建立映射关系后再执行转换。`;
                     document.getElementById('transformBtn').classList.remove('pulse');
+                    // 添加闪烁效果
+                    if (mappingHint) mappingHint.classList.add('blink');
                 } else {
                     step3.classList.add('completed');
                     quickGuideText.textContent = '所有必填字段已映射完成，点击"开始转换"按钮执行数据转换。';
@@ -120,6 +198,8 @@
                     step3.classList.add('active');
                     quickGuideText.textContent = `还有 ${unmappedRequiredCount} 个必填字段未映射，请继续建立映射关系后再执行转换。`;
                     document.getElementById('transformBtn').classList.remove('pulse');
+                    // 添加闪烁效果
+                    if (mappingHint) mappingHint.classList.add('blink');
                 } else {
                     step3.classList.add('completed');
                     quickGuideText.textContent = '所有必填字段已映射完成，点击"开始转换"按钮执行数据转换。';
@@ -846,32 +926,49 @@
         }
         
         async function analyzeAndMap() {
+            console.log('analyzeAndMap called');
             try {
                 // 两个文件都已上传并分析，直接调用 confirm 接口获取映射预览
+                console.log('Calling /api/confirm...');
                 const response = await fetch('/api/confirm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 });
+                console.log('Response received:', response.status);
                 const result = await response.json();
+                console.log('Result:', result);
                 
                 if (result.success) {
+                    console.log('Setting previewData...');
                     previewData = {
                         ...result.preview,
                         mappings: result.mappings,
                         sourceHeaders: result.sourceHeaders,
                         targetHeaders: result.targetHeaders
                     };
+                    console.log('Calling updateMappingDisplay...');
                     updateMappingDisplay();
-                    document.getElementById('statsPanel').style.display = 'flex';
-                    document.getElementById('sourceStatsPanel').style.display = 'flex';
-                    document.getElementById('controlsPanel').style.display = 'block';
+                    console.log('Updating UI elements...');
+                    const statsPanel = document.getElementById('statsPanel');
+                    const sourceStatsPanel = document.getElementById('sourceStatsPanel');
+                    const controlsPanel = document.getElementById('controlsPanel');
+                    
+                    if (statsPanel) statsPanel.style.display = 'flex';
+                    if (sourceStatsPanel) sourceStatsPanel.style.display = 'flex';
+                    if (controlsPanel) controlsPanel.style.display = 'block';
                     if (sourceFile && targetFile) {
                         const mappingControls = document.getElementById('mappingControls');
                         if (mappingControls) mappingControls.style.display = 'flex';
                     }
-                    document.getElementById('transformBtn').disabled = false;
-                    document.getElementById('saveConfigBtn').disabled = false;
+                    console.log('Setting buttons enabled...');
+                    const transformBtn = document.getElementById('transformBtn');
+                    console.log('transformBtn:', transformBtn);
+                    if (transformBtn) transformBtn.disabled = false;
+                    const saveConfigBtn = document.getElementById('saveConfigBtn');
+                    console.log('saveConfigBtn:', saveConfigBtn);
+                    if (saveConfigBtn) saveConfigBtn.disabled = false;
+                    console.log('Calling setTimeout for drawMappings...');
                     setTimeout(drawMappings, 100);
                     renderConfigList();
                     
@@ -1593,14 +1690,13 @@
             const configs = getConfigs();
             const existingIndex = configs.findIndex(c => c.name === name);
             console.log('existingIndex:', existingIndex);
+            
             if (existingIndex >= 0) {
-                setTimeout(() => {
-                    if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
-                        return;
-                    }
-                    console.log('Saving with existing ID:', configs[existingIndex].id);
-                    doSaveConfig(name, configs[existingIndex].id);
-                }, 100);
+                if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
+                    return;
+                }
+                console.log('Saving with existing ID:', configs[existingIndex].id);
+                doSaveConfig(name, configs[existingIndex].id);
                 return;
             }
             
@@ -1850,8 +1946,11 @@
         }
         
         function updateConfigButtons(hasConfig) {
-            document.getElementById('exportConfigBtn').disabled = !hasConfig;
-            document.getElementById('deleteConfigBtn').disabled = !hasConfig;
+            // 导出和删除按钮已移除，使用配置管理界面统一管理
+            // const exportConfigBtn = document.getElementById('exportConfigBtn');
+            // const deleteConfigBtn = document.getElementById('deleteConfigBtn');
+            // if (exportConfigBtn) exportConfigBtn.disabled = !hasConfig;
+            // if (deleteConfigBtn) deleteConfigBtn.disabled = !hasConfig;
         }
         
         function exportCurrentConfig() {
@@ -2029,3 +2128,284 @@
         
         renderConfigList();
         updateSteps();
+        
+        // 配置管理按钮事件
+        document.getElementById('configManageBtn').addEventListener('click', openConfigManageModal);
+        
+        // ========== 配置管理功能 ==========
+        
+        // 打开配置管理弹窗
+        function openConfigManageModal() {
+            renderManageConfigList();
+            document.getElementById('configManageModal').classList.add('show');
+        }
+        
+        // 关闭配置管理弹窗
+        function closeConfigManageModal() {
+            document.getElementById('configManageModal').classList.remove('show');
+        }
+        
+        // 渲染配置管理列表
+        function renderManageConfigList() {
+            console.log('renderManageConfigList called');
+            const configs = getConfigs();
+            console.log('configs:', configs);
+            const container = document.getElementById('manageConfigList');
+            const countEl = document.getElementById('totalConfigCount');
+            const exportBtn = document.getElementById('exportSelectedBtn');
+            
+            if (!container) {
+                console.error('manageConfigList element not found');
+                return;
+            }
+            
+            countEl.textContent = configs.length;
+            
+            if (configs.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">暂无保存的配置</p>';
+                if (exportBtn) exportBtn.disabled = true;
+                return;
+            }
+            
+            if (exportBtn) exportBtn.disabled = false;
+            
+            let html = '';
+            configs.forEach(config => {
+                const date = new Date(config.createdAt).toLocaleString('zh-CN');
+                const sourceCount = config.sourceHeaders ? config.sourceHeaders.length : 0;
+                const targetCount = config.targetHeaders ? config.targetHeaders.length : 0;
+                const mappingsCount = config.mappings ? config.mappings.length : 0;
+                
+                html += `
+                    <div class="config-manage-item">
+                        <label class="checkbox-label">
+                            <input type="checkbox" class="config-checkbox" value="${config.id}" data-name="${escapeHtml(config.name)}">
+                            <div class="config-info">
+                                <div class="config-name">${escapeHtml(config.name)}</div>
+                                <div class="config-meta">创建于 ${date}</div>
+                            </div>
+                        </label>
+                        <div class="config-stats">
+                            <span>源字段：${sourceCount}</span>
+                            <span>目标字段：${targetCount}</span>
+                            <span>映射：${mappingsCount}</span>
+                        </div>
+                        <button class="btn btn-danger btn-sm" onclick="deleteConfig(${config.id}, '${escapeHtml(config.name)}')" title="删除配置" style="margin-left: 15px; padding: 4px 12px; font-size: 12px;">
+                            🗑️ 删除
+                        </button>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            
+            // 监听复选框变化
+            container.querySelectorAll('.config-checkbox').forEach(cb => {
+                cb.addEventListener('change', updateExportButtonState);
+            });
+            
+            updateExportButtonState();
+        }
+        
+        // 全选/取消全选
+        function toggleSelectAllConfigs() {
+            const selectAll = document.getElementById('selectAllConfigs');
+            const checkboxes = document.querySelectorAll('.config-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll.checked;
+            });
+            updateExportButtonState();
+        }
+        
+        // 更新导出按钮状态
+        function updateExportButtonState() {
+            const checkboxes = document.querySelectorAll('.config-checkbox:checked');
+            const exportBtn = document.getElementById('exportSelectedBtn');
+            exportBtn.disabled = checkboxes.length === 0;
+            exportBtn.textContent = checkboxes.length > 0 
+                ? `📤 导出选中配置 (${checkboxes.length})` 
+                : '📤 导出选中配置';
+        }
+        
+        // 导出选中的配置
+        function exportSelectedConfigs() {
+            const checkboxes = document.querySelectorAll('.config-checkbox:checked');
+            if (checkboxes.length === 0) {
+                showError('请至少选择一个配置');
+                return;
+            }
+            
+            const configIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            const allConfigs = getConfigs();
+            const selectedConfigs = allConfigs.filter(c => configIds.includes(c.id));
+            
+            if (selectedConfigs.length === 0) {
+                showError('未找到选中的配置');
+                return;
+            }
+            
+            // 生成文件名
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+            const fileName = selectedConfigs.length === 1 
+                ? `${selectedConfigs[0].name}.json`
+                : `excel-transformer-configs_${dateStr}.json`;
+            
+            // 导出文件
+            const blob = new Blob([JSON.stringify(selectedConfigs, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            showSuccess(`成功导出 ${selectedConfigs.length} 个配置！`);
+            closeConfigManageModal();
+        }
+        
+        // 导入配置文件
+        function importConfigsFile() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const importedConfigs = JSON.parse(event.target.result);
+                        
+                        // 确保是数组格式
+                        const configsArray = Array.isArray(importedConfigs) 
+                            ? importedConfigs 
+                            : [importedConfigs];
+                        
+                        // 验证配置格式
+                        const validConfigs = configsArray.filter(config => 
+                            config.name && config.mappings && config.sourceHeaders && config.targetHeaders
+                        );
+                        
+                        if (validConfigs.length === 0) {
+                            showError('无效的配置文件格式');
+                            return;
+                        }
+                        
+                        // 检查是否有同名配置
+                        const existingConfigs = getConfigs();
+                        const existingNames = new Set(existingConfigs.map(c => c.name));
+                        const conflicts = validConfigs.filter(c => existingNames.has(c.name));
+                        
+                        if (conflicts.length > 0) {
+                            // 有冲突，询问用户
+                            const conflictNames = conflicts.map(c => c.name).join(', ');
+                            const message = `发现 ${conflicts.length} 个同名配置：${conflictNames}\n\n请选择处理方式：`;
+                            
+                            if (confirm(message + '\n\n点击"确定"覆盖现有配置\n点击"取消"跳过这些配置')) {
+                                // 覆盖模式
+                                handleImportConfigs(validConfigs, 'overwrite');
+                            } else {
+                                // 跳过冲突的配置
+                                const nonConflictConfigs = validConfigs.filter(c => !existingNames.has(c.name));
+                                if (nonConflictConfigs.length > 0) {
+                                    handleImportConfigs(nonConflictConfigs, 'skip');
+                                } else {
+                                    showError('所有配置都已存在，已跳过导入');
+                                }
+                            }
+                        } else {
+                            // 没有冲突，直接导入
+                            handleImportConfigs(validConfigs, 'new');
+                        }
+                    } catch (err) {
+                        showError('配置文件解析失败：' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+        
+        // 处理导入配置
+        function handleImportConfigs(configs, mode) {
+            const existingConfigs = getConfigs();
+            let importedCount = 0;
+            let skippedCount = 0;
+            let overwrittenCount = 0;
+            
+            configs.forEach(config => {
+                const existingIndex = existingConfigs.findIndex(c => c.name === config.name);
+                
+                if (existingIndex >= 0) {
+                    if (mode === 'overwrite') {
+                        // 覆盖
+                        config.id = existingConfigs[existingIndex].id; // 保持原 ID
+                        config.createdAt = existingConfigs[existingIndex].createdAt;
+                        existingConfigs[existingIndex] = config;
+                        overwrittenCount++;
+                        importedCount++;
+                    } else {
+                        // 跳过
+                        skippedCount++;
+                    }
+                } else {
+                    // 新配置
+                    config.id = Date.now() + Math.random();
+                    config.createdAt = new Date().toISOString();
+                    existingConfigs.unshift(config);
+                    importedCount++;
+                }
+            });
+            
+            saveConfigs(existingConfigs);
+            renderConfigList();
+            
+            // 显示导入结果
+            let message = `成功导入 ${importedCount} 个配置！`;
+            if (skippedCount > 0) message += `\n跳过 ${skippedCount} 个配置`;
+            if (overwrittenCount > 0) message += `\n覆盖 ${overwrittenCount} 个配置`;
+            
+            showSuccess(message);
+            renderManageConfigList();
+        }
+        
+        // 删除配置
+        function deleteConfig(configId, configName) {
+            console.log('deleteConfig called with:', configId, configName);
+            
+            // 先确认，再删除
+            const confirmed = confirm(`确定要删除配置 "${configName}" 吗？\n\n此操作不可恢复！`);
+            console.log('User confirmed:', confirmed);
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            console.log('Deleting config...');
+            const configs = getConfigs();
+            const filteredConfigs = configs.filter(c => c.id !== configId);
+            
+            if (filteredConfigs.length === configs.length) {
+                showError('未找到要删除的配置');
+                return;
+            }
+            
+            if (saveConfigs(filteredConfigs)) {
+                // 如果删除的是当前加载的配置，清除当前配置
+                if (currentLoadedConfig && currentLoadedConfig.id === configId) {
+                    currentLoadedConfig = null;
+                    const selectEl = document.getElementById('configSelect');
+                    selectEl.value = '';
+                    updateConfigInfoBar();
+                    updateConfigButtons(false);
+                }
+                
+                showSuccess(`配置 "${configName}" 已删除`);
+                renderConfigList();
+                renderManageConfigList();
+            } else {
+                showError('删除配置失败');
+            }
+        }

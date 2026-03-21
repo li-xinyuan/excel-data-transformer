@@ -1,6 +1,6 @@
 {
   "name": "excel-data-transformer",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Excel 数据转换工具，支持智能字段映射和值转换规则配置",
   "main": "transform_excel.js",
   "scripts": {

@@ -9,9 +9,13 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 Excel数据转换工具</h1>
+            <h1>📊 Excel 数据转换工具</h1>
             <p>拖拽上传文件，可视化字段映射，一键完成转换</p>
-
+            <div class="header-actions">
+                <button class="btn btn-secondary" id="configManageBtn" title="配置管理">
+                    ⚙️ 配置管理
+                </button>
+            </div>
         </div>
         
         <div class="steps-bar">
@@ -78,7 +82,13 @@
                         <div class="legend-item"><div class="legend-line low"></div> 低置信度</div>
                         <div class="legend-item"><div class="legend-line manual"></div> 手动映射</div>
                     </div>
-                    <div class="mapping-hint">💡 手动映射：先点击源字段蓝色圆点，变红后，再点击目标字段圆点即可建立连线；点击连线可删除映射；点击连线中的⚙可设置转换规则。</div>
+                    <div class="mapping-hint">
+                        💡 手动映射：
+                        <br/>先点击源数据字段右侧<span class="hint-blue"> ●</span> 圆点，变成<span class="hint-red"> ●</span> 圆点后，
+                        <br/>再点击目标模版字段左侧<span class="hint-blue"> ●</span> 圆点即可建立连线；
+                        <br/>点击<span class="hint-line"> ──</span> 连线可删除映射；
+                        <br/>点击连线中的⚙️可设置转换规则。
+                    </div>
                 </div>
             </div>
 
@@ -111,6 +121,10 @@
         </div>
         
         <div class="controls" id="controlsPanel" style="display:none;">
+            <div class="controls-drag-handle" id="dragHandle">
+                <span class="drag-icon">⋮⋮</span>
+                <span class="drag-hint">🖱️ 点击可拖动控制面板</span>
+            </div>
             <div class="controls-section config-section">
                 <div class="config-row">
                     <div class="config-selector">
@@ -121,9 +135,6 @@
                     </div>
                     <div class="config-actions-inline">
                         <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
-                        <button class="btn btn-secondary btn-icon" onclick="importConfig()" title="导入配置">📥 导入</button>
-                        <button class="btn btn-secondary btn-icon" onclick="exportCurrentConfig()" id="exportConfigBtn" disabled title="导出配置">📤 导出</button>
-                        <button class="btn btn-danger btn-icon" onclick="deleteCurrentConfig()" id="deleteConfigBtn" disabled title="删除配置">🗑️ 删除</button>
                     </div>
                 </div>
                 <div class="config-info-bar" id="configInfoBar"></div>
@@ -225,10 +236,44 @@
         <div class="modal-content" style="min-width: 400px;">
             <h3>📝 新增映射配置</h3>
             <p>没有找到所选文件字段所对应的映射配置，系统需要新增一个，就叫：</p>
-            <input type="text" id="newConfigName" placeholder="什么系统里下载的文件转成年金什么申请格式" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin: 15px 0;">
+            <input type="text" id="newConfigName" placeholder="什么系统里下载的什么文件转成什么格式的文件" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin: 15px 0;">
             <div class="action-buttons">
                 <button class="btn btn-success" onclick="saveNewConfig()">保存配置</button>
-                <button class="btn btn-secondary" onclick="closeAddConfigModal()">暂不新增配置</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('addConfigModal').classList.remove('show')">取消</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 配置管理弹窗 -->
+    <div class="modal" id="configManageModal">
+        <div class="modal-content" style="min-width: 600px;">
+            <h3>⚙️ 配置管理</h3>
+            <div class="config-manage-section">
+                <div class="manage-actions">
+                    <button class="btn btn-primary" onclick="exportSelectedConfigs()" id="exportSelectedBtn" disabled>
+                        📤 导出选中配置
+                    </button>
+                    <button class="btn btn-secondary" onclick="importConfigsFile()">
+                        📥 导入配置
+                    </button>
+                </div>
+                
+                <div class="config-list-container">
+                    <div class="config-list-header">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="selectAllConfigs" onchange="toggleSelectAllConfigs()">
+                            <span>全选</span>
+                        </label>
+                        <span class="config-count">共 <span id="totalConfigCount">0</span> 个配置</span>
+                    </div>
+                    <div class="manage-config-list" id="manageConfigList">
+                        <p style="color: #666; text-align: center; padding: 20px;">暂无保存的配置</p>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" onclick="closeConfigManageModal()">关闭</button>
+                </div>
             </div>
         </div>
     </div>
