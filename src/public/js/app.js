@@ -20,6 +20,391 @@
             }
         }
         
+        // ========== 数据预览功能 ==========
+        let currentPreviewData = null;
+        let currentPreviewTab = 'source';
+        let currentActiveMappings = [];
+        let currentRowIndex = 0; // 当前显示的行号（源数据和目标数据共用，从 0 开始）
+        
+        // 显示数据预览
+        async function showDataPreview() {
+            if (!previewData || !sourceFile || !targetFile) {
+                showError('请先上传文件并建立映射关系');
+                return;
+            }
+            
+            const previewBtn = document.getElementById('previewBtn');
+            if (previewBtn) previewBtn.disabled = true;
+            previewBtn.textContent = '⏳ 加载中...';
+            
+            try {
+                // 调用预览接口
+                const transformRules = getValueTransformRules();
+                console.log('[Preview] 准备发送的转换规则:', JSON.stringify(transformRules, null, 2));
+                console.log('[Preview] 手动映射:', manualMappings);
+                console.log('[Preview] 移除的映射:', removedMappings);
+                
+                const response = await fetch('/api/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mappings: previewData.mappings,
+                        manualMappings: manualMappings,
+                        removedMappings: removedMappings,
+                        valueTransformRules: transformRules,
+                        previewRows: 10
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentPreviewData = result.previewData;
+                    // 使用后端返回的实际映射关系
+                    currentActiveMappings = result.activeMappings || [];
+                    // 重置行号为第 1 行
+                    currentRowIndex = 0;
+                    
+                    // 显示统计信息
+                    const statsEl = document.getElementById('previewStatistics');
+                    if (statsEl) {
+                        statsEl.innerHTML = `
+                            <div class="preview-stat-item">总行数：<strong>${result.statistics.totalRows}</strong></div>
+                            <div class="preview-stat-item">预览行数：<strong>${result.statistics.previewRows}</strong></div>
+                            <div class="preview-stat-item">已映射字段：<strong>${result.statistics.mappedFields}</strong></div>
+                        `;
+                    }
+                    
+                    // 直接显示对比视图
+                    const previewContent = document.getElementById('previewContent');
+                    if (previewContent) {
+                        previewContent.innerHTML = renderComparisonView();
+                    }
+                    
+                    // 打开弹窗
+                    document.getElementById('dataPreviewModalNew').style.display = 'flex';
+                } else {
+                    showError('预览失败：' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('预览失败:', error);
+                let errorMsg = '未知错误';
+                if (typeof error === 'object') {
+                    errorMsg = error.message || error.error || JSON.stringify(error);
+                } else if (typeof error === 'string') {
+                    errorMsg = error;
+                }
+                showError('预览失败：' + errorMsg);
+            } finally {
+                if (previewBtn) {
+                    previewBtn.disabled = false;
+                    previewBtn.textContent = '👀 预览转换结果';
+                }
+            }
+        }
+        
+        // 关闭数据预览
+        function closeDataPreview() {
+            document.getElementById('dataPreviewModalNew').style.display = 'none';
+            currentPreviewData = null;
+        }
+        
+        // 切换预览标签页
+        function switchPreviewTab(tab) {
+            currentPreviewTab = tab;
+            
+            // 更新标签样式
+            document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // 渲染内容
+            renderPreviewContent(tab);
+        }
+        
+        // 监听窗口 resize，重新绘制连线
+        window.addEventListener('resize', () => {
+            if (currentPreviewTab === 'comparison' && currentPreviewData) {
+                // 使用后端返回的实际映射关系
+                setTimeout(() => drawComparisonConnections(currentActiveMappings), 100);
+            }
+        });
+        
+        // 渲染预览内容
+        function renderPreviewContent(tab) {
+            const container = document.getElementById('previewContent');
+            if (!container || !currentPreviewData) return;
+            
+            let html = '';
+            
+            if (tab === 'source') {
+                html = renderPreviewTable(
+                    currentPreviewData.source.headers,
+                    currentPreviewData.source.rows,
+                    'source'
+                );
+            } else if (tab === 'target') {
+                html = renderPreviewTable(
+                    currentPreviewData.target.headers,
+                    currentPreviewData.target.rows,
+                    'target'
+                );
+            } else if (tab === 'comparison') {
+                html = renderComparisonView();
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        // 渲染预览表格
+        function renderPreviewTable(headers, rows, type) {
+            if (!headers || !rows || rows.length === 0) {
+                return '<p style="text-align: center; color: #999; padding: 40px;">暂无数据</p>';
+            }
+            
+            let html = `<table class="preview-table">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;">#</th>
+                        ${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map((row, idx) => `
+                        <tr>
+                            <td style="color: #999; text-align: center;">${idx + 1}</td>
+                            ${headers.map(h => `<td>${escapeHtml(row[h] !== undefined ? row[h] : '')}</td>`).join('')}
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>`;
+            
+            return html;
+        }
+        
+        // 渲染对比视图
+        function renderComparisonView() {
+            if (!currentPreviewData) return '';
+            
+            const sourceHeaders = currentPreviewData.source.headers;
+            const targetHeaders = currentPreviewData.target.headers;
+            const sourceRows = currentPreviewData.source.rows;
+            const targetRows = currentPreviewData.target.rows;
+            
+            // 使用后端返回的实际映射关系
+            const activeMappings = currentActiveMappings;
+            
+            // 确保行号在有效范围内
+            if (currentRowIndex >= sourceRows.length) {
+                currentRowIndex = Math.max(0, sourceRows.length - 1);
+            }
+            const currentRow = sourceRows[currentRowIndex] || {};
+            const currentTargetRow = targetRows[currentRowIndex] || {};
+            
+            let html = `<div class="comparison-container" id="comparisonContainer">
+                <!-- 源数据表格 -->
+                <div class="comparison-panel" style="display: flex; align-items: flex-start; gap: 10px;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+                        <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📥 源数据</div>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+                            <button onclick="changeRow(-1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▲</button>
+                            <input type="number" id="rowIndex" value="${currentRowIndex + 1}" min="1" max="${Math.max(sourceRows.length, targetRows.length)}" onchange="gotoRow(this.value)" style="width: 45px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px 2px; font-size: 13px;" />
+                            <button onclick="changeRow(1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▼</button>
+                        </div>
+                        <div style="font-size: 11px; color: #999;">/${sourceRows.length}</div>
+                    </div>
+                    <div style="flex: 1; overflow: auto;">
+                        <table class="preview-table" id="sourcePreviewTable">
+                            <thead>
+                                <tr>
+                                    ${sourceHeaders.map((h, i) => 
+                                        `<th data-index="${i}" id="source-th-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(h)}</th>`
+                                    ).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    ${sourceHeaders.map(h => 
+                                        `<td style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentRow[h] !== undefined ? currentRow[h] : '')}</td>`
+                                    ).join('')}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- 连线箭头 -->
+                <div class="comparison-arrow">↓</div>
+                
+                <!-- 目标数据表格 -->
+                <div class="comparison-panel" style="display: flex; align-items: flex-start; gap: 10px;">
+                    <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📤 目标数据</div>
+                    <div style="flex: 1; overflow: auto;">
+                        <table class="preview-table" id="targetPreviewTable">
+                            <thead>
+                                <tr>
+                                    ${targetHeaders.map((h, i) => 
+                                        `<th data-index="${i}" id="target-th-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(h)}</th>`
+                                    ).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    ${targetHeaders.map(h => 
+                                        `<td style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentTargetRow[h] !== undefined ? currentTargetRow[h] : '')}</td>`
+                                    ).join('')}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- SVG 连线层 -->
+                <svg class="connection-layer" id="comparisonConnectionLayer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;">
+                </svg>
+            </div>`;
+            
+            // 延迟绘制连线（等 DOM 渲染完成）
+            setTimeout(() => drawComparisonConnections(activeMappings), 100);
+            
+            return html;
+        }
+        
+        // 获取值转换规则
+        function getValueTransformRules() {
+            // 返回全局存储的值转换规则
+            return valueTransformRules || {};
+        }
+        
+        // 更新预览按钮状态
+        function updatePreviewButton() {
+            const previewBtn = document.getElementById('previewBtn');
+            if (previewBtn) {
+                previewBtn.disabled = !(sourceFile && targetFile && previewData);
+            }
+        }
+        
+        // 切换行号
+        function changeRow(delta) {
+            const sourceRows = currentPreviewData?.source?.rows || [];
+            if (sourceRows.length === 0) return;
+            
+            const newIndex = currentRowIndex + delta;
+            if (newIndex >= 0 && newIndex < sourceRows.length) {
+                currentRowIndex = newIndex;
+                // 更新输入框显示
+                const inputEl = document.getElementById('rowIndex');
+                if (inputEl) {
+                    inputEl.value = newIndex + 1;
+                }
+                // 重新渲染对比视图
+                const previewContent = document.getElementById('previewContent');
+                if (previewContent) {
+                    previewContent.innerHTML = renderComparisonView();
+                }
+            }
+        }
+        
+        // 跳转到指定行号
+        function gotoRow(rowNum) {
+            const sourceRows = currentPreviewData?.source?.rows || [];
+            if (sourceRows.length === 0) return;
+            
+            const num = parseInt(rowNum);
+            if (!isNaN(num) && num >= 1 && num <= sourceRows.length) {
+                currentRowIndex = num - 1; // 转为 0 基索引
+                // 重新渲染对比视图
+                const previewContent = document.getElementById('previewContent');
+                if (previewContent) {
+                    previewContent.innerHTML = renderComparisonView();
+                }
+            }
+        }
+        
+        // 绘制对比视图的连线
+        function drawComparisonConnections(mappings) {
+            const svg = document.getElementById('comparisonConnectionLayer');
+            const container = document.getElementById('comparisonContainer');
+            
+            if (!svg || !container) return;
+            
+            const containerRect = container.getBoundingClientRect();
+            
+            // 清空旧连线
+            svg.innerHTML = '';
+            
+            // 过滤掉已移除的映射
+            const activeMappings = mappings.filter(m => 
+                !removedMappings.some(rm => rm.targetIndex === m.targetIndex)
+            );
+            
+            activeMappings.forEach(mapping => {
+                const sourceTh = document.getElementById(`source-th-${mapping.sourceIndex}`);
+                const targetTh = document.getElementById(`target-th-${mapping.targetIndex}`);
+                
+                if (!sourceTh || !targetTh) return;
+                
+                const sourceRect = sourceTh.getBoundingClientRect();
+                const targetRect = targetTh.getBoundingClientRect();
+                
+                // 计算坐标（相对于 SVG 容器）
+                const x1 = sourceRect.left + sourceRect.width/2 - containerRect.left;
+                const y1 = sourceRect.bottom - containerRect.top;
+                const x2 = targetRect.left + targetRect.width/2 - containerRect.left;
+                const y2 = targetRect.top - containerRect.top;
+                
+                // 根据映射类型确定颜色
+                let color = '#4361ee'; // 默认蓝色（手动映射）
+                let strokeWidth = 2;
+                let strokeDasharray = '5,5'; // 虚线
+                
+                if (mapping.matchType === 'manual') {
+                    color = '#4361ee';
+                    strokeWidth = 2;
+                    strokeDasharray = ''; // 实线
+                } else if (mapping.score >= 80) {
+                    color = '#4CAF50'; // 高置信度 - 绿色
+                    strokeWidth = 3;
+                    strokeDasharray = '';
+                } else if (mapping.score >= 50) {
+                    color = '#FF9800'; // 中置信度 - 橙色
+                    strokeWidth = 2;
+                    strokeDasharray = '5,5';
+                } else {
+                    color = '#F44336'; // 低置信度 - 红色
+                    strokeWidth = 2;
+                    strokeDasharray = '5,5';
+                }
+                
+                // 创建贝塞尔曲线路径
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                
+                // 计算控制点
+                const controlY1 = y1 + (y2 - y1) * 0.3;
+                const controlY2 = y1 + (y2 - y1) * 0.7;
+                
+                const d = `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y2}`;
+                
+                path.setAttribute('d', d);
+                path.setAttribute('stroke', color);
+                path.setAttribute('stroke-width', strokeWidth.toString());
+                path.setAttribute('stroke-dasharray', strokeDasharray);
+                path.setAttribute('fill', 'none');
+                path.setAttribute('opacity', '0.7');
+                
+                svg.appendChild(path);
+                
+                // 添加终点圆点
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', x2);
+                circle.setAttribute('cy', y2);
+                circle.setAttribute('r', '4');
+                circle.setAttribute('fill', color);
+                circle.setAttribute('opacity', '0.8');
+                
+                svg.appendChild(circle);
+            });
+        }
+        
         // ========== 控制面板拖拽功能 ==========
         let isDragging = false;
         let dragOffsetX = 0;
@@ -226,6 +611,9 @@
                 mainContent.classList.add('has-overlay');
                 quickGuideText.textContent = '请上传您需要转换的源数据文件，该文件应包含目标模板所需的所有字段列。支持拖拽或点击选择文件上传。';
             }
+            
+            // 更新预览按钮状态
+            updatePreviewButton();
         }
         
         function removeFile(type) {

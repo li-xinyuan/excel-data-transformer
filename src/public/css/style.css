@@ -224,15 +224,51 @@
         }
         
         .hint-blue {
-            color: #2196F3;
+            color: #4361ee;
             font-weight: 600;
             font-size: 14px;
+            display: inline-block;
+            animation: hint-point-blink 3s ease-in-out infinite;
+        }
+        
+        .hint-blue.blink {
+            animation: hint-point-blink 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes hint-point-blink {
+            0%, 100% {
+                opacity: 1;
+                text-shadow: 0 0 0 rgba(67, 97, 238, 0);
+            }
+            50% {
+                opacity: 0.6;
+                text-shadow: 0 0 8px rgba(67, 97, 238, 0.5);
+            }
         }
         
         .hint-red {
             color: #F44336;
             font-weight: 600;
             font-size: 14px;
+            display: inline-block;
+            animation: hint-red-blink 3s ease-in-out infinite;
+        }
+        
+        .hint-red.blink {
+            animation: hint-red-blink 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes hint-red-blink {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+                text-shadow: 0 0 0 rgba(244, 67, 54, 0);
+            }
+            50% {
+                opacity: 0.7;
+                transform: scale(1.3);
+                text-shadow: 0 0 10px rgba(244, 67, 54, 0.6);
+            }
         }
         
         .hint-line {
@@ -1058,6 +1094,16 @@
             box-shadow: 0 8px 25px rgba(76, 175, 80, 0.4);
         }
         
+        .btn-info {
+            background: var(--info-color);
+            color: white;
+        }
+        
+        .btn-info:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(33, 150, 243, 0.4);
+        }
+        
         .btn-secondary {
             background: #e0e0e0;
             color: #333;
@@ -1175,6 +1221,109 @@
             color: #1565c0;
             border: 1px solid #bbdefb;
             animation: fadeIn 0.5s ease-out;
+        }
+        
+        /* 数据预览弹窗样式 */
+        .preview-statistics {
+            display: flex;
+            gap: 15px;
+            padding: 8px 0;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .preview-stat-item {
+            padding: 6px 12px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        .preview-stat-item strong {
+            color: #2196F3;
+            margin-left: 5px;
+        }
+        
+        .preview-tabs {
+            display: flex;
+            gap: 10px;
+            border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 15px;
+        }
+        
+        .preview-tab {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+        
+        .preview-tab:hover {
+            color: #2196F3;
+        }
+        
+        .preview-tab.active {
+            color: #2196F3;
+            border-bottom-color: #2196F3;
+            font-weight: 600;
+        }
+        
+        .preview-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        
+        .preview-table th,
+        .preview-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .preview-table th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .preview-table tr:nth-child(even) {
+            background: #fafafa;
+        }
+        
+        .preview-table tr:hover {
+            background: #f0f7ff;
+        }
+        
+        .comparison-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            position: relative;
+        }
+        
+        .comparison-panel {
+            flex: 1;
+            overflow: auto;
+            max-height: 50vh;
+        }
+        
+        .comparison-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: #4361ee;
+            font-weight: bold;
+            padding: 5px 0;
         }
         
         .instructions strong {

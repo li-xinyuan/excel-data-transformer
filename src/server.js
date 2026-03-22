@@ -80,6 +80,11 @@ function startWebServer() {
                     return;
                 }
                 
+                if (req.url === '/api/preview' && req.method === 'POST') {
+                    handlePreview(req, res, server, resolve);
+                    return;
+                }
+                
                 if (req.url === '/api/cancel' && req.method === 'POST') {
                     req.session.transformConfirmed = false;
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -469,6 +474,221 @@ async function handleConfirm(req, res, server, resolvePromise) {
         logErrorHandler(error, { url: req.url, method: req.method });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+async function handlePreview(req, res, server, resolvePromise) {
+    try {
+        if (!req.session.isReadyForMapping()) {
+            const error = createError(
+                ERROR_TYPES.INVALID_STATE,
+                ERROR_CODES.INVALID_STATE,
+                '请先上传并分析源文件和目标模板'
+            );
+            logErrorHandler(error, { url: req.url, method: req.method });
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(formatErrorResponse(error)));
+            return;
+        }
+        
+        // 解析请求体
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const requestData = JSON.parse(body);
+                const previewRows = requestData.previewRows || 10;
+                
+                // 读取源数据前 N 行
+                const xlsxLib = require('xlsx');
+                const sourceWorkbook = xlsxLib.readFile(req.session.sourceFilePath);
+                const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+                const sourceData = xlsxLib.utils.sheet_to_json(sourceSheet, { header: 1 });
+                
+                // 获取表头和数据行
+                const sourceHeaders = sourceData[0];
+                const sourceRows = sourceData.slice(1, previewRows + 1);
+                
+                // 构建映射关系
+                const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
+                
+                // 合并手动映射
+                if (requestData.manualMappings && requestData.manualMappings.length > 0) {
+                    requestData.manualMappings.forEach(mm => {
+                        const existingIndex = mapping.columnMappings.findIndex(cm => cm.targetIndex === mm.target);
+                        if (existingIndex >= 0) {
+                            mapping.columnMappings[existingIndex] = {
+                                ...mapping.columnMappings[existingIndex],
+                                sourceIndex: mm.source,
+                                sourceField: req.session.sourceAnalysis.dataHeaders[mm.source]
+                            };
+                        } else {
+                            mapping.columnMappings.push({
+                                targetField: req.session.targetAnalysis.dataHeaders[mm.target],
+                                targetIndex: mm.target,
+                                sourceField: req.session.sourceAnalysis.dataHeaders[mm.source],
+                                sourceIndex: mm.source,
+                                score: 100,
+                                matchType: 'manual'
+                            });
+                        }
+                    });
+                }
+                
+                // 删除移除的映射
+                if (requestData.removedMappings && requestData.removedMappings.length > 0) {
+                    mapping.columnMappings = mapping.columnMappings.filter(cm => 
+                        !requestData.removedMappings.some(rm => rm.targetIndex === cm.targetIndex)
+                    );
+                }
+                
+                // 应用值转换规则
+                const valueTransformRules = requestData.valueTransformRules || {};
+                
+                // 调试日志：查看接收到的转换规则
+                console.log('[Preview] 接收到的值转换规则:', JSON.stringify(valueTransformRules, null, 2));
+                console.log('[Preview] 映射关系数量:', mapping.columnMappings.length);
+                
+                // 转换数据
+                const transformedRows = [];
+                sourceRows.forEach((sourceRow, rowIndex) => {
+                    const targetRow = {};
+                    
+                    req.session.targetAnalysis.dataHeaders.forEach((targetHeader, targetIndex) => {
+                        // 查找映射关系
+                        const mappingInfo = mapping.columnMappings.find(m => m.targetIndex === targetIndex);
+                        
+                        if (mappingInfo && mappingInfo.sourceIndex !== undefined) {
+                            let value = sourceRow[mappingInfo.sourceIndex];
+                            
+                            // 应用值转换规则
+                            const ruleKey = `${mappingInfo.sourceIndex}_${targetIndex}`;
+                            console.log(`[Preview] 检查字段 ${targetHeader}: ruleKey=${ruleKey}, sourceValue=${value}, 有规则=${!!valueTransformRules[ruleKey]}`);
+                            if (valueTransformRules[ruleKey]) {
+                                const rule = valueTransformRules[ruleKey];
+                                console.log(`[Preview] 应用规则:`, JSON.stringify(rule, null, 2));
+                                
+                                // 根据操作类型应用转换
+                                if (rule.operation) {
+                                    value = applyValueTransform(value, rule);
+                                    console.log(`[Preview] 转换后值：${value}`);
+                                }
+                            }
+                            
+                            targetRow[targetHeader] = value !== undefined && value !== null ? value : '';
+                        } else {
+                            // 没有映射的字段留空
+                            targetRow[targetHeader] = '';
+                        }
+                    });
+                    
+                    transformedRows.push(targetRow);
+                });
+                
+                // 返回预览数据
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    previewData: {
+                        source: {
+                            headers: sourceHeaders,
+                            rows: sourceRows.map(row => {
+                                const obj = {};
+                                sourceHeaders.forEach((h, i) => obj[h] = row[i] !== undefined ? row[i] : '');
+                                return obj;
+                            })
+                        },
+                        target: {
+                            headers: req.session.targetAnalysis.dataHeaders,
+                            rows: transformedRows
+                        }
+                    },
+                    // 返回当前实际生效的映射关系（包括自动映射和手动映射，排除已移除的）
+                activeMappings: mapping.columnMappings.map(m => ({
+                    sourceIndex: m.sourceIndex,
+                    targetIndex: m.targetIndex,
+                    score: m.score,
+                    matchType: m.matchType || 'auto'
+                })),
+                    statistics: {
+                        totalRows: req.session.sourceAnalysis.dataRows.length,
+                        previewRows: transformedRows.length,
+                        mappedFields: mapping.columnMappings.length
+                    }
+                }));
+                
+                logger.info({ sessionId: req.sessionId, previewRows: transformedRows.length }, '数据预览完成');
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+// 应用值转换规则
+function applyValueTransform(value, rule) {
+    if (value === undefined || value === null || value === '') {
+        return value;
+    }
+    
+    switch (rule.operation) {
+        case 'substring': {
+            // 截取字符串 (参数："0,5" 表示从位置 0 开始截取 5 个字符)
+            const params = (rule.params || '0,5').split(',');
+            const start = parseInt(params[0]) || 0;
+            const length = parseInt(params[1]) || value.length;
+            return String(value).substring(start, start + length);
+        }
+        
+        case 'replace': {
+            // 替换字符串 (参数："a,b" 表示将 a 替换为 b)
+            const params = (rule.params || '').split(',');
+            if (params.length >= 2) {
+                const search = params[0];
+                const replace = params[1];
+                return String(value).split(search).join(replace);
+            }
+            return value;
+        }
+        
+        case 'trim':
+            // 去除空格
+            return String(value).trim();
+        
+        case 'uppercase':
+            // 转为大写
+            return String(value).toUpperCase();
+        
+        case 'lowercase':
+            // 转为小写
+            return String(value).toLowerCase();
+        
+        case 'round':
+            // 四舍五入
+            return Math.round(parseFloat(value) || 0);
+        
+        case 'floor':
+            // 向下取整
+            return Math.floor(parseFloat(value) || 0);
+        
+        case 'ceil':
+            // 向上取整
+            return Math.ceil(parseFloat(value) || 0);
+        
+        case 'fixed': {
+            // 保留小数 (参数：小数位数)
+            const decimals = parseInt(rule.params) || 2;
+            return (parseFloat(value) || 0).toFixed(decimals);
+        }
+        
+        default:
+            return value;
     }
 }
 

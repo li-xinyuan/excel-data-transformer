@@ -13,7 +13,7 @@
             <p>拖拽上传文件，可视化字段映射，一键完成转换</p>
             <div class="header-actions">
                 <button class="btn btn-secondary" id="configManageBtn" title="配置管理">
-                    ⚙️ 配置管理
+                    ⚙️ 配置导出/导入
                 </button>
             </div>
         </div>
@@ -133,13 +133,11 @@
                             <option value="">-- 选择配置 --</option>
                         </select>
                     </div>
-                    <div class="config-actions-inline">
-                        <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
-                    </div>
-                </div>
-                <div class="config-info-bar" id="configInfoBar"></div>
+                    <div class="config-info-bar" id="configInfoBar"></div>
             </div>
             <div class="controls-section action-section">
+                <button class="btn btn-info btn-large" id="previewBtn" onclick="showDataPreview()" disabled>👀 预览转换结果</button>
+                <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
                 <button class="btn btn-success btn-large" id="transformBtn" onclick="confirmTransform()" disabled>🔄 开始转换</button>
             </div>
         </div>
@@ -247,7 +245,7 @@
     <!-- 配置管理弹窗 -->
     <div class="modal" id="configManageModal">
         <div class="modal-content" style="min-width: 600px;">
-            <h3>⚙️ 配置管理</h3>
+            <h3>⚙️ 配置导出/导入</h3>
             <div class="config-manage-section">
                 <div class="manage-actions">
                     <button class="btn btn-primary" onclick="exportSelectedConfigs()" id="exportSelectedBtn" disabled>
@@ -284,6 +282,23 @@
             <div id="dataPreviewModalContent" style="max-height: 60vh; overflow: auto; border: 1px solid #e0e0e0; border-radius: 8px;"></div>
             <div class="action-buttons" style="margin-top: 20px;">
                 <button class="btn btn-primary" onclick="closeDataPreviewModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 数据预览弹窗 -->
+    <div class="modal" id="dataPreviewModalNew">
+        <div class="modal-content" style="min-width: 1400px; max-width: 98vw; padding: 20px;">
+            <h3 style="margin: 0 0 10px 0; font-size: 18px;">👀 数据转换预览</h3>
+            <div class="preview-statistics" id="previewStatistics" style="margin-bottom: 10px;"></div>
+            
+            <div id="previewContent" style="max-height: 65vh; overflow: auto;">
+                <!-- 动态加载预览内容 -->
+            </div>
+            
+            <div class="action-buttons" style="margin-top: 15px;">
+                <button class="btn btn-secondary" onclick="closeDataPreview()">关闭</button>
+                <button class="btn btn-success" onclick="closeDataPreview(); confirmTransform()">✅ 确认转换</button>
             </div>
         </div>
     </div>
