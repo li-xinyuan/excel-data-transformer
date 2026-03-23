@@ -107,7 +107,7 @@ function buildFieldMapping(source, target) {
             const shClean = shLower.replace(/\*/g, '').trim();
             
             if (thClean === shClean) {
-                score = 90;
+                score = 100; // 精确匹配返回100分
             } else {
                 const thWords = thClean.split(/[\s_\-：:]+/).filter(w => w.length > 0);
                 const shWords = shClean.split(/[\s_\-：:]+/).filter(w => w.length > 0);

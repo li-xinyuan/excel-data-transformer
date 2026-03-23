@@ -27,7 +27,7 @@ const {
 
 const { analyzeSourceFile, analyzeTargetTemplate } = require('./excelParser');
 const { buildFieldMapping, previewTransformation, applyManualMappings } = require('./fieldMapper');
-const { transformData, buildOutputRows, writeOutputFile } = require('./dataTransformer');
+const { transformData, buildOutputRows, writeOutputFile, applyValueTransformForOutput } = require('./dataTransformer');
 const { sessionManager } = require('./sessionContext');
 const { sessionMiddleware, setSessionCookie } = require('./middleware/session');
 
@@ -382,7 +382,8 @@ async function handleConfirm(req, res, server, resolvePromise) {
                                 mapping.columnMappings[existingIndex] = {
                                     ...mapping.columnMappings[existingIndex],
                                     sourceIndex: mm.source,
-                                    sourceField: req.session.sourceAnalysis.dataHeaders[mm.source]
+                                    sourceField: req.session.sourceAnalysis.dataHeaders[mm.source],
+                                    matchType: 'manual' // 更新为手动映射
                                 };
                             } else {
                                 mapping.columnMappings.push({
@@ -405,8 +406,14 @@ async function handleConfirm(req, res, server, resolvePromise) {
                     }
                     
                     // 应用值转换规则
-                    if (requestData.valueTransformRules && Object.keys(requestData.valueTransformRules).length > 0) {
-                        // TODO: 实现值转换规则的应用
+                    const valueTransformRules = requestData.valueTransformRules || {};
+                    if (Object.keys(valueTransformRules).length > 0) {
+                        mapping.columnMappings.forEach(colMapping => {
+                            const ruleKey = `${colMapping.sourceIndex}_${colMapping.targetIndex}`;
+                            if (valueTransformRules[ruleKey] && Array.isArray(valueTransformRules[ruleKey])) {
+                                colMapping.valueTransformRules = valueTransformRules[ruleKey];
+                            }
+                        });
                     }
                     
                     // 构建输出数据
@@ -512,6 +519,9 @@ async function handlePreview(req, res, server, resolvePromise) {
                 // 构建映射关系
                 const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
                 
+                console.log('[Preview] 初始映射数量:', mapping.columnMappings.length);
+                console.log('[Preview] 初始映射示例:', mapping.columnMappings.slice(0, 3));
+                
                 // 合并手动映射
                 if (requestData.manualMappings && requestData.manualMappings.length > 0) {
                     requestData.manualMappings.forEach(mm => {
@@ -520,7 +530,8 @@ async function handlePreview(req, res, server, resolvePromise) {
                             mapping.columnMappings[existingIndex] = {
                                 ...mapping.columnMappings[existingIndex],
                                 sourceIndex: mm.source,
-                                sourceField: req.session.sourceAnalysis.dataHeaders[mm.source]
+                                sourceField: req.session.sourceAnalysis.dataHeaders[mm.source],
+                                matchType: 'manual' // 更新为手动映射
                             };
                         } else {
                             mapping.columnMappings.push({
@@ -564,15 +575,15 @@ async function handlePreview(req, res, server, resolvePromise) {
                             // 应用值转换规则
                             const ruleKey = `${mappingInfo.sourceIndex}_${targetIndex}`;
                             console.log(`[Preview] 检查字段 ${targetHeader}: ruleKey=${ruleKey}, sourceValue=${value}, 有规则=${!!valueTransformRules[ruleKey]}`);
-                            if (valueTransformRules[ruleKey]) {
-                                const rule = valueTransformRules[ruleKey];
-                                console.log(`[Preview] 应用规则:`, JSON.stringify(rule, null, 2));
+                            if (valueTransformRules[ruleKey] && Array.isArray(valueTransformRules[ruleKey])) {
+                                const rules = valueTransformRules[ruleKey];
+                                console.log(`[Preview] 应用规则:`, JSON.stringify(rules, null, 2));
                                 
-                                // 根据操作类型应用转换
-                                if (rule.operation) {
-                                    value = applyValueTransform(value, rule);
-                                    console.log(`[Preview] 转换后值：${value}`);
-                                }
+                                // 遍历应用所有转换规则
+                                rules.forEach(rule => {
+                                    value = applyValueTransformForOutput(value, rule);
+                                });
+                                console.log(`[Preview] 转换后值：${value}`);
                             }
                             
                             targetRow[targetHeader] = value !== undefined && value !== null ? value : '';
@@ -604,12 +615,14 @@ async function handlePreview(req, res, server, resolvePromise) {
                         }
                     },
                     // 返回当前实际生效的映射关系（包括自动映射和手动映射，排除已移除的）
-                activeMappings: mapping.columnMappings.map(m => ({
-                    sourceIndex: m.sourceIndex,
-                    targetIndex: m.targetIndex,
-                    score: m.score,
-                    matchType: m.matchType || 'auto'
-                })),
+                    activeMappings: mapping.columnMappings.map(m => ({
+                        sourceIndex: m.sourceIndex,
+                        targetIndex: m.targetIndex,
+                        score: m.score,
+                        matchType: m.matchType || 'auto'
+                    })),
+                    // 返回值转换规则信息
+                    valueTransformRules: requestData.valueTransformRules || {},
                     statistics: {
                         totalRows: req.session.sourceAnalysis.dataRows.length,
                         previewRows: transformedRows.length,
@@ -628,67 +641,6 @@ async function handlePreview(req, res, server, resolvePromise) {
         logErrorHandler(error, { url: req.url, method: req.method });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(formatErrorResponse(error)));
-    }
-}
-
-// 应用值转换规则
-function applyValueTransform(value, rule) {
-    if (value === undefined || value === null || value === '') {
-        return value;
-    }
-    
-    switch (rule.operation) {
-        case 'substring': {
-            // 截取字符串 (参数："0,5" 表示从位置 0 开始截取 5 个字符)
-            const params = (rule.params || '0,5').split(',');
-            const start = parseInt(params[0]) || 0;
-            const length = parseInt(params[1]) || value.length;
-            return String(value).substring(start, start + length);
-        }
-        
-        case 'replace': {
-            // 替换字符串 (参数："a,b" 表示将 a 替换为 b)
-            const params = (rule.params || '').split(',');
-            if (params.length >= 2) {
-                const search = params[0];
-                const replace = params[1];
-                return String(value).split(search).join(replace);
-            }
-            return value;
-        }
-        
-        case 'trim':
-            // 去除空格
-            return String(value).trim();
-        
-        case 'uppercase':
-            // 转为大写
-            return String(value).toUpperCase();
-        
-        case 'lowercase':
-            // 转为小写
-            return String(value).toLowerCase();
-        
-        case 'round':
-            // 四舍五入
-            return Math.round(parseFloat(value) || 0);
-        
-        case 'floor':
-            // 向下取整
-            return Math.floor(parseFloat(value) || 0);
-        
-        case 'ceil':
-            // 向上取整
-            return Math.ceil(parseFloat(value) || 0);
-        
-        case 'fixed': {
-            // 保留小数 (参数：小数位数)
-            const decimals = parseInt(rule.params) || 2;
-            return (parseFloat(value) || 0).toFixed(decimals);
-        }
-        
-        default:
-            return value;
     }
 }
 

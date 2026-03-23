@@ -24,6 +24,7 @@
         let currentPreviewData = null;
         let currentPreviewTab = 'source';
         let currentActiveMappings = [];
+        let previewValueTransformRules = {}; // 存储预览数据的值转换规则
         let currentRowIndex = 0; // 当前显示的行号（源数据和目标数据共用，从 0 开始）
         
         // 显示数据预览
@@ -62,6 +63,8 @@
                     currentPreviewData = result.previewData;
                     // 使用后端返回的实际映射关系
                     currentActiveMappings = result.activeMappings || [];
+                    // 保存值转换规则
+                    previewValueTransformRules = result.valueTransformRules || {};
                     // 重置行号为第 1 行
                     currentRowIndex = 0;
                     
@@ -70,7 +73,7 @@
                     if (statsEl) {
                         statsEl.innerHTML = `
                             <div class="preview-stat-item">总行数：<strong>${result.statistics.totalRows}</strong></div>
-                            <div class="preview-stat-item">预览行数：<strong>${result.statistics.previewRows}</strong></div>
+                            <div class="preview-stat-item">预览行数：<strong id="previewRowNumber">${currentRowIndex + 1} / ${result.statistics.totalRows}</strong></div>
                             <div class="preview-stat-item">已映射字段：<strong>${result.statistics.mappedFields}</strong></div>
                         `;
                     }
@@ -207,7 +210,7 @@
                         <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📥 源数据</div>
                         <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
                             <button onclick="changeRow(-1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▲</button>
-                            <input type="number" id="rowIndex" value="${currentRowIndex + 1}" min="1" max="${Math.max(sourceRows.length, targetRows.length)}" onchange="gotoRow(this.value)" style="width: 45px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px 2px; font-size: 13px;" />
+                            <input type="number" id="rowIndex" value="${currentRowIndex + 1}" min="1" max="${Math.max(sourceRows.length, targetRows.length)}" onchange="gotoRow(this.value)" style="width: 45px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px 2px; font-size: 13px; -moz-appearance: textfield; -webkit-appearance: none; appearance: none;" />
                             <button onclick="changeRow(1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▼</button>
                         </div>
                         <div style="font-size: 11px; color: #999;">/${sourceRows.length}</div>
@@ -223,8 +226,8 @@
                             </thead>
                             <tbody>
                                 <tr>
-                                    ${sourceHeaders.map(h => 
-                                        `<td style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentRow[h] !== undefined ? currentRow[h] : '')}</td>`
+                                    ${sourceHeaders.map((h, i) =>
+                                        `<td data-index="${i}" id="source-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentRow[h] !== undefined ? currentRow[h] : '')}</td>`
                                     ).join('')}
                                 </tr>
                             </tbody>
@@ -249,9 +252,12 @@
                             </thead>
                             <tbody>
                                 <tr>
-                                    ${targetHeaders.map(h => 
-                                        `<td style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentTargetRow[h] !== undefined ? currentTargetRow[h] : '')}</td>`
-                                    ).join('')}
+                                    ${targetHeaders.map((h, i) => {
+                                        const mapping = currentActiveMappings.find(m => m.targetIndex === i);
+                                        const hasTransformRules = mapping ? !!previewValueTransformRules[`${mapping.sourceIndex}_${i}`] : false;
+                                        const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
+                                        return `<td data-index="${i}" id="target-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; ${hasTransformRules ? 'background-color: #fff3cd;' : ''}">${escapeHtml(displayValue)}</td>`;
+                                    }).join('')}
                                 </tr>
                             </tbody>
                         </table>
@@ -267,6 +273,48 @@
             setTimeout(() => drawComparisonConnections(activeMappings), 100);
             
             return html;
+        }
+        
+        // 应用值转换规则
+        function applyTransformRules(value, rules) {
+            if (!rules || rules.length === 0 || value === undefined || value === null || value === '') {
+                return value;
+            }
+            
+            let result = value;
+            rules.forEach(rule => {
+                switch (rule.operation) {
+                    case 'substring': {
+                        const params = (rule.params || '0,5').split(',');
+                        const start = parseInt(params[0]) || 0;
+                        const length = parseInt(params[1]) || result.length;
+                        result = String(result).substring(start, start + length);
+                        break;
+                    }
+                    case 'replace': {
+                        const params = (rule.params || '').split(',');
+                        if (params.length >= 2) {
+                            const search = params[0];
+                            const replace = params[1];
+                            result = String(result).split(search).join(replace);
+                        }
+                        break;
+                    }
+                    case 'trim':
+                        result = String(result).trim();
+                        break;
+                    case 'uppercase':
+                        result = String(result).toUpperCase();
+                        break;
+                    case 'lowercase':
+                        result = String(result).toLowerCase();
+                        break;
+                    case 'round':
+                        result = Math.round(parseFloat(result) || 0);
+                        break;
+                }
+            });
+            return result;
         }
         
         // 获取值转换规则
@@ -296,6 +344,8 @@
                 if (inputEl) {
                     inputEl.value = newIndex + 1;
                 }
+                // 更新预览行数显示
+                updatePreviewRowDisplay();
                 // 重新渲染对比视图
                 const previewContent = document.getElementById('previewContent');
                 if (previewContent) {
@@ -312,11 +362,22 @@
             const num = parseInt(rowNum);
             if (!isNaN(num) && num >= 1 && num <= sourceRows.length) {
                 currentRowIndex = num - 1; // 转为 0 基索引
+                // 更新预览行数显示
+                updatePreviewRowDisplay();
                 // 重新渲染对比视图
                 const previewContent = document.getElementById('previewContent');
                 if (previewContent) {
                     previewContent.innerHTML = renderComparisonView();
                 }
+            }
+        }
+        
+        // 更新预览行数显示
+        function updatePreviewRowDisplay() {
+            const sourceRows = currentPreviewData?.source?.rows || [];
+            const previewRowEl = document.getElementById('previewRowNumber');
+            if (previewRowEl && sourceRows.length > 0) {
+                previewRowEl.textContent = `${currentRowIndex + 1} / ${sourceRows.length}`;
             }
         }
         
@@ -338,41 +399,47 @@
             );
             
             activeMappings.forEach(mapping => {
-                const sourceTh = document.getElementById(`source-th-${mapping.sourceIndex}`);
+                const sourceTd = document.getElementById(`source-td-${mapping.sourceIndex}`);
                 const targetTh = document.getElementById(`target-th-${mapping.targetIndex}`);
                 
-                if (!sourceTh || !targetTh) return;
+                if (!sourceTd || !targetTh) return;
                 
-                const sourceRect = sourceTh.getBoundingClientRect();
+                const sourceRect = sourceTd.getBoundingClientRect();
                 const targetRect = targetTh.getBoundingClientRect();
                 
                 // 计算坐标（相对于 SVG 容器）
+                // 连线起点：源数据单元格的下边缘
                 const x1 = sourceRect.left + sourceRect.width/2 - containerRect.left;
                 const y1 = sourceRect.bottom - containerRect.top;
+                // 连线终点：目标数据表头的上边缘
                 const x2 = targetRect.left + targetRect.width/2 - containerRect.left;
                 const y2 = targetRect.top - containerRect.top;
                 
                 // 根据映射类型确定颜色
-                let color = '#4361ee'; // 默认蓝色（手动映射）
+                let color = '#F44336'; // 默认红色（低置信度）
                 let strokeWidth = 2;
-                let strokeDasharray = '5,5'; // 虚线
+                let strokeDasharray = '2,2'; // 虚线
                 
                 if (mapping.matchType === 'manual') {
-                    color = '#4361ee';
-                    strokeWidth = 2;
+                    // 🔵 蓝色 = 手动映射
+                    color = '#2196f3';
+                    strokeWidth = 3;
                     strokeDasharray = ''; // 实线
-                } else if (mapping.score >= 80) {
-                    color = '#4CAF50'; // 高置信度 - 绿色
+                } else if (mapping.score === 100) {
+                    // 🟢 绿色（高置信度）= score = 100
+                    color = '#4CAF50';
                     strokeWidth = 3;
                     strokeDasharray = '';
-                } else if (mapping.score >= 50) {
-                    color = '#FF9800'; // 中置信度 - 橙色
+                } else if (mapping.score >= 80) {
+                    // 🟠 橙色（中置信度）= score >= 80
+                    color = '#FF9800';
                     strokeWidth = 2;
                     strokeDasharray = '5,5';
                 } else {
-                    color = '#F44336'; // 低置信度 - 红色
+                    // 🔴 红色（低置信度）= score < 80
+                    color = '#F44336';
                     strokeWidth = 2;
-                    strokeDasharray = '5,5';
+                    strokeDasharray = '2,2';
                 }
                 
                 // 创建贝塞尔曲线路径
@@ -393,6 +460,19 @@
                 
                 svg.appendChild(path);
                 
+                // 添加起点圆点
+                const startCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                startCircle.setAttribute('cx', x1);
+                startCircle.setAttribute('cy', y1);
+                startCircle.setAttribute('r', '4');
+                startCircle.setAttribute('fill', color);
+                startCircle.setAttribute('opacity', '0.8');
+                
+                svg.appendChild(startCircle);
+                
+                // 检查是否有转换规则
+                const hasTransformRules = !!previewValueTransformRules[`${mapping.sourceIndex}_${mapping.targetIndex}`];
+                
                 // 添加终点圆点
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 circle.setAttribute('cx', x2);
@@ -402,6 +482,26 @@
                 circle.setAttribute('opacity', '0.8');
                 
                 svg.appendChild(circle);
+                
+                // 如果有转换规则，在连线中间添加 ⚙ 标记
+                if (hasTransformRules) {
+                    const midX = (x1 + x2) / 2;
+                    const midY = (y1 + y2) / 2;
+                    
+                    const foreignObj = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+                    foreignObj.setAttribute('x', String(midX - 10));
+                    foreignObj.setAttribute('y', String(midY - 10));
+                    foreignObj.setAttribute('width', '20');
+                    foreignObj.setAttribute('height', '20');
+                    foreignObj.style.pointerEvents = 'none';
+                    
+                    const iconDiv = document.createElement('div');
+                    iconDiv.style.cssText = 'width:20px;height:20px;background:#fff3cd;border:2px solid #ff9800;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;';
+                    iconDiv.textContent = '⚙';
+                    
+                    foreignObj.appendChild(iconDiv);
+                    svg.appendChild(foreignObj);
+                }
             });
         }
         
@@ -1687,13 +1787,18 @@
                 let showLine = false;
                 let lineClass = '';
                 
-                if (mapping.score >= 80) {
+                // 🔵 蓝色 = 手动映射（matchType === 'manual'）在后面单独处理
+                // 🟢 绿色（高置信度）= score = 100
+                // 🟠 橙色（中置信度）= score >= 80
+                // 🔴 红色（低置信度）= score < 80
+                
+                if (mapping.score === 100) {
                     showLine = true;
                     lineClass = 'high';
-                } else if (mapping.score >= 50) {
+                } else if (mapping.score >= 80) {
                     showLine = true;
                     lineClass = 'medium';
-                } else if (mapping.score < 50) {
+                } else {
                     showLine = true;
                     lineClass = 'low';
                 }
@@ -1747,6 +1852,34 @@
             hitPath.dataset.targetIndex = targetIdx;
             hitPath.dataset.sourceIdx = sourceIdx;
             
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M ${x1} ${y1} C ${(x1 + x2) * 0.3} ${y1}, ${(x1 + x2) * 0.7} ${y2}, ${x2} ${y2}`);
+            path.setAttribute('class', `mapping-line ${lineClass}`);
+            // 直接设置颜色和样式（SVG 的 CSS 类可能不生效）
+            if (lineClass === 'high') {
+                path.setAttribute('stroke', '#4CAF50'); // 绿色
+                path.setAttribute('stroke-width', '3');
+                path.setAttribute('stroke-dasharray', '');
+            } else if (lineClass === 'medium') {
+                path.setAttribute('stroke', '#FF9800'); // 橙色
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke-dasharray', '5,5');
+            } else if (lineClass === 'low') {
+                path.setAttribute('stroke', '#F44336'); // 红色
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke-dasharray', '2,2');
+            } else if (lineClass === 'manual') {
+                path.setAttribute('stroke', '#2196f3'); // 蓝色
+                path.setAttribute('stroke-width', '3');
+                path.setAttribute('stroke-dasharray', '');
+            }
+            path.style.pointerEvents = 'none';
+            path.dataset.targetIndex = targetIdx;
+            path.dataset.sourceIdx = sourceIdx;
+            path.dataset.midX = midX;
+            path.dataset.midY = midY;
+            canvas.appendChild(path);
+            
             hitPath.addEventListener('mouseenter', () => {
                 path.style.strokeWidth = '4';
                 sourceEl.style.transform = 'translateX(10px)';
@@ -1766,16 +1899,6 @@
                 }
             });
             canvas.appendChild(hitPath);
-            
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('d', `M ${x1} ${y1} C ${(x1 + x2) * 0.3} ${y1}, ${(x1 + x2) * 0.7} ${y2}, ${x2} ${y2}`);
-            path.setAttribute('class', `mapping-line ${lineClass}`);
-            path.style.pointerEvents = 'none';
-            path.dataset.targetIndex = targetIdx;
-            path.dataset.sourceIdx = sourceIdx;
-            path.dataset.midX = midX;
-            path.dataset.midY = midY;
-            canvas.appendChild(path);
             
             const foreignObj = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
             foreignObj.setAttribute('x', midX - 18);
@@ -1816,7 +1939,7 @@
                 text.setAttribute('y', midY - 25);
                 text.setAttribute('text-anchor', 'middle');
                 text.setAttribute('class', 'line-label');
-                text.textContent = score >= 80 ? '高' : score >= 50 ? '中' : '低';
+                text.textContent = score === 100 ? '高' : score >= 80 ? '中' : '低';
                 text.style.fontWeight = '600';
                 canvas.appendChild(text);
             }
@@ -2094,11 +2217,48 @@
         
         function doSaveConfig(name, existingId) {
             console.log('doSaveConfig called, name:', name, 'existingId:', existingId);
+            console.log('previewData.mappings:', JSON.stringify(previewData.mappings, null, 2));
+            console.log('manualMappings:', manualMappings);
+            console.log('removedMappings:', removedMappings);
             
             if (!name) {
                 alert('配置名称不能为空');
                 return;
             }
+            
+            // 构建最终的映射列表（合并自动映射和手动映射）
+            const finalMappings = [];
+            
+            // 先添加所有有效的自动映射（保留后端返回的原始 matchType：text、semantic）
+            (previewData.mappings || [])
+                .filter(m => !removedMappings.some(r => r.targetIndex === m.targetIndex))
+                .filter(m => !manualMappings.some(mm => mm.target === m.targetIndex)) // 排除被手动映射覆盖的
+                .forEach(m => {
+                    console.log(`[SaveConfig] 自动映射: target=${m.targetIndex}, score=${m.score}, matchType=${m.matchType}`);
+                    finalMappings.push({
+                        sourceIndex: m.sourceIndex,
+                        targetIndex: m.targetIndex,
+                        sourceField: m.sourceField || previewData.sourceHeaders[m.sourceIndex],
+                        targetField: m.targetField || previewData.targetHeaders[m.targetIndex],
+                        score: m.score,
+                        matchType: m.matchType || 'text' // 保留原始 matchType
+                    });
+                });
+            
+            // 添加所有手动映射（标记为 manual）
+            manualMappings.forEach(m => {
+                console.log(`[SaveConfig] 手动映射: target=${m.target}, score=100, matchType=manual`);
+                finalMappings.push({
+                    sourceIndex: m.source,
+                    targetIndex: m.target,
+                    sourceField: m.sourceField || previewData.sourceHeaders[m.source],
+                    targetField: m.targetField || previewData.targetHeaders[m.target],
+                    score: 100,
+                    matchType: 'manual'
+                });
+            });
+            
+            console.log('[SaveConfig] finalMappings:', JSON.stringify(finalMappings, null, 2));
             
             const config = {
                 id: existingId || Date.now(),
@@ -2106,18 +2266,7 @@
                 createdAt: new Date().toISOString(),
                 sourceHeaders: previewData.sourceHeaders,
                 targetHeaders: previewData.targetHeaders,
-                mappings: (previewData.mappings || [])
-                    .filter(m => !removedMappings.some(r => r.targetIndex === m.targetIndex))
-                    .map(m => ({
-                        ...m,
-                        sourceField: m.sourceField || previewData.sourceHeaders[m.sourceIndex],
-                        targetField: m.targetField || previewData.targetHeaders[m.targetIndex]
-                    })),
-                manualMappings: manualMappings.map(m => ({
-                    ...m,
-                    sourceField: m.sourceField || previewData.sourceHeaders[m.source],
-                    targetField: m.targetField || previewData.targetHeaders[m.target]
-                })),
+                mappings: finalMappings,
                 valueTransformRules: valueTransformRules
             };
             
@@ -2385,18 +2534,42 @@
                 }
             }
             
-            manualMappings = [...(config.manualMappings || [])];
+            // 兼容旧配置：如果有 manualMappings 字段，也一并处理
+            const legacyManualMappings = (config.manualMappings || []).map(m => ({
+                source: m.sourceIndex !== undefined ? m.sourceIndex : m.source,
+                target: m.targetIndex !== undefined ? m.targetIndex : m.target,
+                sourceField: m.sourceField,
+                targetField: m.targetField
+            }));
+            
+            // 合并手动映射（来自新配置的 mappings 和旧配置的 manualMappings）
+            const allManualMappings = [
+                ...(config.mappings || []).filter(m => m.matchType === 'manual').map(m => ({
+                    source: m.sourceIndex,
+                    target: m.targetIndex,
+                    sourceField: m.sourceField,
+                    targetField: m.targetField
+                })),
+                ...legacyManualMappings.filter(lm => !(config.mappings || []).some(m => m.targetIndex === lm.target && m.matchType === 'manual'))
+            ];
+            
+            // 去重
+            const seenTargets = new Set();
+            manualMappings = allManualMappings.filter(m => {
+                if (seenTargets.has(m.target)) return false;
+                seenTargets.add(m.target);
+                return true;
+            });
+            
             removedMappings = [];
             valueTransformRules = config.valueTransformRules || {};
             currentLoadedConfig = config;
             
-            (config.mappings || []).forEach(m => {
-                if (!manualMappings.some(mm => mm.target === m.targetIndex)) {
-                    if (m.score < 80) {
-                        removedMappings.push({ targetIndex: m.targetIndex });
-                    }
-                }
-            });
+            // 更新 previewData.mappings 为配置的映射（保留原始 matchType）
+            previewData.mappings = (config.mappings || []).map(m => ({
+                ...m,
+                matchType: m.matchType || 'text' // 保留原始 matchType
+            }));
             
             updateMappingDisplay();
             updateStats();

@@ -140,8 +140,35 @@ function applyLogicTransform(value, rule, row) {
         return result;
     } catch (error) {
         console.error('逻辑表达式解析错误:', error);
-        return value;
+        return result;
     }
+}
+
+// 值转换统一函数（用于 buildOutputRows）
+function applyValueTransformForOutput(value, rule) {
+    if (value === undefined || value === null) return value;
+    
+    if (rule.type === 'simple') {
+        // 简单替换
+        if (String(rule.source) === String(value)) {
+            return rule.target;
+        }
+        return value;
+    } else if (rule.type === 'string') {
+        // 字符串处理
+        return applyStringTransform(value, rule);
+    } else if (rule.type === 'date') {
+        // 日期转换
+        return applyDateTransform(value, rule);
+    } else if (rule.type === 'number') {
+        // 数值处理
+        return applyNumberTransform(value, rule);
+    } else if (rule.type === 'logic') {
+        // 逻辑运算
+        return applyLogicTransform(value, rule, [value]);
+    }
+    
+    return value;
 }
 
 
@@ -306,11 +333,19 @@ function buildOutputRows(target, transformedData, mapping, originalTargetData) {
         // 根据映射关系填充数据
         mapping.columnMappings.forEach(m => {
             if (m.sourceIndex !== undefined && m.targetIndex !== undefined) {
-                const sourceValue = row[m.sourceIndex];
+                let sourceValue = row[m.sourceIndex];
                 // 源字段为空时，目标字段也设置为空
-                rowData[m.targetIndex] = sourceValue !== undefined && sourceValue !== null 
-                    ? sourceValue
-                    : '';
+                if (sourceValue !== undefined && sourceValue !== null) {
+                    // 应用值转换规则
+                    if (m.valueTransformRules && Array.isArray(m.valueTransformRules)) {
+                        m.valueTransformRules.forEach(rule => {
+                            sourceValue = applyValueTransformForOutput(sourceValue, rule);
+                        });
+                    }
+                    rowData[m.targetIndex] = sourceValue;
+                } else {
+                    rowData[m.targetIndex] = '';
+                }
             }
         });
         
@@ -393,5 +428,6 @@ module.exports = {
     applyStringTransform,
     applyDateTransform,
     applyNumberTransform,
+    applyValueTransformForOutput,
     formatDate
 };
