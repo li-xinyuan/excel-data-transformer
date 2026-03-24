@@ -1414,30 +1414,23 @@
         }
         
         async function analyzeAndMap() {
-            console.log('analyzeAndMap called');
             try {
-                // 两个文件都已上传并分析，直接调用 confirm 接口获取映射预览
-                console.log('Calling /api/confirm...');
                 const response = await fetch('/api/confirm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 });
-                console.log('Response received:', response.status);
                 const result = await response.json();
-                console.log('Result:', result);
                 
                 if (result.success) {
-                    console.log('Setting previewData...');
                     previewData = {
                         ...result.preview,
                         mappings: result.mappings,
                         sourceHeaders: result.sourceHeaders,
                         targetHeaders: result.targetHeaders
                     };
-                    console.log('Calling updateMappingDisplay...');
                     updateMappingDisplay();
-                    console.log('Updating UI elements...');
+                    updateStats();
                     const statsPanel = document.getElementById('statsPanel');
                     const sourceStatsPanel = document.getElementById('sourceStatsPanel');
                     const controlsPanel = document.getElementById('controlsPanel');
@@ -1449,14 +1442,10 @@
                         const mappingControls = document.getElementById('mappingControls');
                         if (mappingControls) mappingControls.style.display = 'flex';
                     }
-                    console.log('Setting buttons enabled...');
                     const transformBtn = document.getElementById('transformBtn');
-                    console.log('transformBtn:', transformBtn);
                     if (transformBtn) transformBtn.disabled = false;
                     const saveConfigBtn = document.getElementById('saveConfigBtn');
-                    console.log('saveConfigBtn:', saveConfigBtn);
                     if (saveConfigBtn) saveConfigBtn.disabled = false;
-                    console.log('Calling setTimeout for drawMappings...');
                     setTimeout(drawMappings, 100);
                     renderConfigList();
                     
@@ -1483,8 +1472,8 @@
                             loadConfig(bestConfig.id);
                         }
                     } else {
-                        // 没有找到匹配的配置，自动建立字段名完全一样的映射
-                        autoMapExactMatches();
+                        // 不需要调用 autoMapExactMatches()，因为后端 /api/confirm 已经返回了正确的映射
+                        // previewData.mappings 已经包含了精确匹配（score=100）的映射
                         // 弹出提示要新建配置
                         setTimeout(() => {
                             showAddConfigModal();
@@ -1557,17 +1546,11 @@
                 mappedTargetIndices.add(m.target);
                 mappedSourceIndices.add(m.source);
             });
-            
-            console.log('updateMappingDisplay - mappedTargetIndices:', [...mappedTargetIndices]);
-            console.log('updateMappingDisplay - removedMappings:', removedMappings);
-            console.log('updateMappingDisplay - manualMappings:', manualMappings);
-            
+
             document.querySelectorAll('.target-panel .field-item').forEach(el => {
                 const idx = parseInt(el.dataset.index);
                 const isRequired = el.dataset.isRequired === 'true';
                 const isMapped = mappedTargetIndices.has(idx);
-                
-                console.log(`Field ${idx}: isRequired=${isRequired}, isMapped=${isMapped}, classes=${el.className}`);
                 
                 el.classList.remove('mapped', 'missing');
                 
@@ -1583,10 +1566,8 @@
                 if (isRequired) {
                     if (isMapped) {
                         el.classList.add('mapped');
-                        console.log(`Field ${idx}: added 'mapped' class`);
                     } else {
                         el.classList.add('missing');
-                        console.log(`Field ${idx}: added 'missing' class`);
                     }
                 }
             });
@@ -1781,8 +1762,12 @@
             document.querySelectorAll('.connection-point').forEach(p => p.classList.remove('connected'));
             
             (previewData.mappings || []).forEach(mapping => {
-                if (removedMappings.some(r => r.targetIndex === mapping.targetIndex)) return;
-                if (manualMappings.some(m => m.target === mapping.targetIndex)) return;
+                if (removedMappings.some(r => r.targetIndex === mapping.targetIndex)) {
+                    return;
+                }
+                if (manualMappings.some(m => m.target === mapping.targetIndex)) {
+                    return;
+                }
                 
                 let showLine = false;
                 let lineClass = '';
@@ -1948,13 +1933,6 @@
             const targetPoint = targetEl.querySelector('.connection-point');
             if (sourcePoint) sourcePoint.classList.add('connected');
             if (targetPoint) targetPoint.classList.add('connected');
-        }
-        
-        function resetMappings() {
-            manualMappings = [];
-            removedMappings = [];
-            updateMappingDisplay();
-            drawMappings();
         }
         
         function cancelTransform() {
@@ -2185,9 +2163,7 @@
         }
         
         function saveConfig() {
-            console.log('saveConfig function called');
             const name = document.getElementById('configName').value.trim();
-            console.log('Config name input:', name, 'type:', typeof name);
             if (!name) {
                 alert('请输入配置名称');
                 return;
@@ -2200,54 +2176,41 @@
             
             const configs = getConfigs();
             const existingIndex = configs.findIndex(c => c.name === name);
-            console.log('existingIndex:', existingIndex);
             
             if (existingIndex >= 0) {
                 if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
                     return;
                 }
-                console.log('Saving with existing ID:', configs[existingIndex].id);
                 doSaveConfig(name, configs[existingIndex].id);
                 return;
             }
             
-            console.log('Saving as new config with name:', name);
             doSaveConfig(name, null);
         }
         
         function doSaveConfig(name, existingId) {
-            console.log('doSaveConfig called, name:', name, 'existingId:', existingId);
-            console.log('previewData.mappings:', JSON.stringify(previewData.mappings, null, 2));
-            console.log('manualMappings:', manualMappings);
-            console.log('removedMappings:', removedMappings);
-            
             if (!name) {
                 alert('配置名称不能为空');
                 return;
             }
             
-            // 构建最终的映射列表（合并自动映射和手动映射）
             const finalMappings = [];
             
-            // 先添加所有有效的自动映射（保留后端返回的原始 matchType：text、semantic）
             (previewData.mappings || [])
                 .filter(m => !removedMappings.some(r => r.targetIndex === m.targetIndex))
-                .filter(m => !manualMappings.some(mm => mm.target === m.targetIndex)) // 排除被手动映射覆盖的
+                .filter(m => !manualMappings.some(mm => mm.target === m.targetIndex))
                 .forEach(m => {
-                    console.log(`[SaveConfig] 自动映射: target=${m.targetIndex}, score=${m.score}, matchType=${m.matchType}`);
                     finalMappings.push({
                         sourceIndex: m.sourceIndex,
                         targetIndex: m.targetIndex,
                         sourceField: m.sourceField || previewData.sourceHeaders[m.sourceIndex],
                         targetField: m.targetField || previewData.targetHeaders[m.targetIndex],
                         score: m.score,
-                        matchType: m.matchType || 'text' // 保留原始 matchType
+                        matchType: m.matchType || 'text'
                     });
                 });
             
-            // 添加所有手动映射（标记为 manual）
             manualMappings.forEach(m => {
-                console.log(`[SaveConfig] 手动映射: target=${m.target}, score=100, matchType=manual`);
                 finalMappings.push({
                     sourceIndex: m.source,
                     targetIndex: m.target,
@@ -2257,8 +2220,6 @@
                     matchType: 'manual'
                 });
             });
-            
-            console.log('[SaveConfig] finalMappings:', JSON.stringify(finalMappings, null, 2));
             
             const config = {
                 id: existingId || Date.now(),
@@ -2280,7 +2241,6 @@
             
             if (saveConfigs(configs)) {
                 currentLoadedConfig = config;
-                console.log('Calling loadConfig with config.id:', config.id, typeof config.id);
                 showSuccess(`配置 "${name}" 保存成功！`);
                 
                 // 保存 pendingTransformAfterSave 的值，因为 closeSaveConfigModal 会重置它
@@ -2507,13 +2467,9 @@
         }
         
         function loadConfig(configId) {
-            console.log('loadConfig called with:', configId, typeof configId);
             const configs = getConfigs();
-            console.log('configs:', configs);
             const configIdNum = typeof configId === 'string' ? parseInt(configId) : configId;
-            console.log('configIdNum:', configIdNum, typeof configIdNum);
             const config = configs.find(c => c.id === configIdNum || c.id === configId);
-            console.log('found config:', config);
             
             if (!config) {
                 alert('配置不存在');
@@ -2708,9 +2664,7 @@
         
         // 渲染配置管理列表
         function renderManageConfigList() {
-            console.log('renderManageConfigList called');
             const configs = getConfigs();
-            console.log('configs:', configs);
             const container = document.getElementById('manageConfigList');
             const countEl = document.getElementById('totalConfigCount');
             const exportBtn = document.getElementById('exportSelectedBtn');
@@ -2934,17 +2888,12 @@
         
         // 删除配置
         function deleteConfig(configId, configName) {
-            console.log('deleteConfig called with:', configId, configName);
-            
-            // 先确认，再删除
             const confirmed = confirm(`确定要删除配置 "${configName}" 吗？\n\n此操作不可恢复！`);
-            console.log('User confirmed:', confirmed);
             
             if (!confirmed) {
                 return;
             }
             
-            console.log('Deleting config...');
             const configs = getConfigs();
             const filteredConfigs = configs.filter(c => c.id !== configId);
             
