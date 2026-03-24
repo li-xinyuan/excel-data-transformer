@@ -1526,6 +1526,21 @@
             position: relative;
         }
         
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 18px;
+            font-size: 20px;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        
+        .modal-close:hover {
+            opacity: 1;
+        }
+        
         
         
         .modal-content h3 {

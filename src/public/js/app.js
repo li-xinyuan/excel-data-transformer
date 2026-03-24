@@ -1653,7 +1653,6 @@
             });
             
             updateMappingDisplay();
-            updateStats();
             drawMappings();
             updateSteps();
         }
@@ -1697,8 +1696,8 @@
         function updateStats() {
             if (!previewData) return;
             
-            const mappedCount = (previewData.mappings || []).filter(m => 
-                !removedMappings.some(r => r.targetIndex === m.targetIndex)
+            const mappedCount = (previewData.mappings || []).filter(m =>
+                !removedMappings.some(r => r.targetIndex === m.targetIndex) && m.matchType !== 'manual'
             ).length + manualMappings.length;
             
             const missingCount = (previewData.missingFields || []).length - 
@@ -1706,6 +1705,7 @@
             
             const mappedRequiredCount = (previewData.mappings || []).filter(m => {
                 if (removedMappings.some(r => r.targetIndex === m.targetIndex)) return false;
+                if (m.matchType === 'manual') return false;
                 const header = previewData.targetHeaders[m.targetIndex];
                 return header && header.includes('*');
             }).length + manualMappings.filter(m => {
