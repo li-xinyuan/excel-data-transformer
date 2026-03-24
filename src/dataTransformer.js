@@ -36,8 +36,23 @@ function applyStringTransform(value, rule) {
         case 'lowercase':
             result = result.toLowerCase();
             break;
+        case 'extract':
+            if (rule.params) {
+                try {
+                    const regex = new RegExp(rule.params);
+                    const match = result.match(regex);
+                    if (match) {
+                        result = match[1] !== undefined ? match[1] : match[0];
+                    } else {
+                        result = '';
+                    }
+                } catch (e) {
+                    logger.warn({ error: e.message }, '正则提取失败');
+                }
+            }
+            break;
     }
-    
+
     return result;
 }
 

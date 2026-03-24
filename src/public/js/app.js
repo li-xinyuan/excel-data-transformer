@@ -1219,12 +1219,14 @@
                             <select onchange="updateTransformRule(${idx}, 'operation', this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
                                 <option value="substring" ${rule.operation === 'substring' ? 'selected' : ''}>截取字符串</option>
                                 <option value="replace" ${rule.operation === 'replace' ? 'selected' : ''}>替换字符串</option>
+                                <option value="extract" ${rule.operation === 'extract' ? 'selected' : ''}>正则提取</option>
                                 <option value="trim" ${rule.operation === 'trim' ? 'selected' : ''}>去除空格</option>
                                 <option value="uppercase" ${rule.operation === 'uppercase' ? 'selected' : ''}>转为大写</option>
                                 <option value="lowercase" ${rule.operation === 'lowercase' ? 'selected' : ''}>转为小写</option>
                             </select>
                             ${rule.operation === 'substring' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="起始位置,长度 (如: 0,5)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
                             ${rule.operation === 'replace' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="查找,替换 (如: a,b)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
+                            ${rule.operation === 'extract' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="正则表达式 (如: (\\d{4})年)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
                         `;
                         targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="默认值（可选）">`;
                         break;
@@ -2155,11 +2157,28 @@
             }
             document.getElementById('saveConfigModal').classList.add('show');
             document.getElementById('configName').focus();
+            checkConfigName();
         }
         
         function closeSaveConfigModal() {
             document.getElementById('saveConfigModal').classList.remove('show');
             pendingTransformAfterSave = false;
+        }
+        
+        function checkConfigName() {
+            const name = document.getElementById('configName').value.trim();
+            const hint = document.getElementById('configNameHint');
+            const configs = getConfigs();
+
+            const existingConfig = configs.find(c => c.name === name);
+
+            if (name && existingConfig) {
+                hint.innerHTML = `<span style="color: #e67e22;">⚠️ 配置 "${name}" 已存在，点击保存将覆盖原配置</span>`;
+            } else if (name) {
+                hint.innerHTML = `<span style="color: #27ae60;">✓ 新配置</span>`;
+            } else {
+                hint.innerHTML = '';
+            }
         }
         
         function saveConfig() {
@@ -2175,17 +2194,13 @@
             }
             
             const configs = getConfigs();
-            const existingIndex = configs.findIndex(c => c.name === name);
+            const existingConfig = configs.find(c => c.name === name);
             
-            if (existingIndex >= 0) {
-                if (!confirm(`配置 "${name}" 已存在，是否覆盖？`)) {
-                    return;
-                }
-                doSaveConfig(name, configs[existingIndex].id);
-                return;
+            if (existingConfig) {
+                doSaveConfig(name, existingConfig.id);
+            } else {
+                doSaveConfig(name, null);
             }
-            
-            doSaveConfig(name, null);
         }
         
         function doSaveConfig(name, existingId) {
@@ -2429,16 +2444,8 @@
             }
             
             const date = new Date(config.createdAt).toLocaleString('zh-CN');
-            let matchInfo = '';
-            
-            if (previewData) {
-                const sourceMatch = calculateMatchScore(config.sourceHeaders, previewData.sourceHeaders);
-                const targetMatch = calculateMatchScore(config.targetHeaders, previewData.targetHeaders);
-                const totalMatch = (sourceMatch + targetMatch) / 2;
-                matchInfo = ` | 匹配度: ${Math.round(totalMatch * 100)}%`;
-            }
-            
-            infoBar.innerHTML = `📅 ${escapeHtml(date)} | 源字段: ${config.sourceHeaders.length} | 目标字段: ${config.targetHeaders.length}${escapeHtml(matchInfo)}`;
+
+            infoBar.innerHTML = `📅 ${escapeHtml(date)} | 源字段: ${config.sourceHeaders.length} | 目标字段: ${config.targetHeaders.length}`;
             infoBar.classList.add('visible');
         }
         

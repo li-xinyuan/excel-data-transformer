@@ -138,7 +138,7 @@
             </div>
             <div class="controls-section action-section">
                 <button class="btn btn-info btn-large" id="previewBtn" onclick="showDataPreview()" disabled>👀 预览转换结果</button>
-                <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存</button>
+                <button class="btn btn-primary btn-icon" onclick="openSaveConfigModal()" id="saveConfigBtn" disabled title="保存配置">💾 保存配置</button>
                 <button class="btn btn-success btn-large" id="transformBtn" onclick="confirmTransform()" disabled>🔄 开始转换</button>
             </div>
         </div>
@@ -211,11 +211,12 @@
             <span class="modal-close" onclick="closeSaveConfigModal()">❌</span>
             <h3>💾 保存映射配置</h3>
             <p style="margin: 15px 0;">
-                <input type="text" id="configName" placeholder="请输入配置名称" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                <input type="text" id="configName" placeholder="请输入配置名称" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" oninput="checkConfigName()">
             </p>
+            <p id="configNameHint" style="margin: -10px 0 10px 0; font-size: 13px; color: #666;"></p>
             <div class="action-buttons">
                 <button class="btn btn-secondary" onclick="closeSaveConfigModal()">取消</button>
-                <button class="btn btn-success" onclick="saveConfig()">保存</button>
+                <button class="btn btn-success" id="saveConfigBtn" onclick="saveConfig()">保存</button>
             </div>
         </div>
     </div>
