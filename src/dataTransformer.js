@@ -3,7 +3,7 @@ const { Parser } = require('expr-eval');
 const { logger } = require('./utils/logger');
 
 // 字符串处理函数
-function applyStringTransform(value, rule) {
+function applyStringTransform(value, rule, errors = null) {
     if (value === undefined || value === null) return value;
     
     let result = String(value);
@@ -23,7 +23,18 @@ function applyStringTransform(value, rule) {
             if (rule.params) {
                 const [search, replace] = rule.params.split(',').map(p => p.trim());
                 if (search) {
-                    result = result.replace(new RegExp(search, 'g'), replace || '');
+                    try {
+                        result = result.replace(new RegExp(search, 'g'), replace || '');
+                    } catch (e) {
+                        const errorMsg = `正则替换失败: ${e.message}`;
+                        logger.warn({ error: e.message, pattern: search }, '正则替换失败');
+                        if (errors) errors.push({ 
+                            type: 'replace', 
+                            pattern: String(search), 
+                            error: String(e.message), 
+                            value: String(value).substring(0, 50)
+                        });
+                    }
                 }
             }
             break;
@@ -47,7 +58,14 @@ function applyStringTransform(value, rule) {
                         result = '';
                     }
                 } catch (e) {
-                    logger.warn({ error: e.message }, '正则提取失败');
+                    const errorMsg = `正则提取失败: ${e.message}`;
+                    logger.warn({ error: e.message, pattern: rule.params }, '正则提取失败');
+                    if (errors) errors.push({ 
+                        type: 'extract', 
+                        pattern: String(rule.params), 
+                        error: String(e.message), 
+                        value: String(value).substring(0, 50)
+                    });
                 }
             }
             break;
@@ -160,7 +178,7 @@ function applyLogicTransform(value, rule, row) {
 }
 
 // 值转换统一函数（用于 buildOutputRows）
-function applyValueTransformForOutput(value, rule) {
+function applyValueTransformForOutput(value, rule, errors = null) {
     if (value === undefined || value === null) return value;
     
     if (rule.type === 'simple') {
@@ -171,7 +189,7 @@ function applyValueTransformForOutput(value, rule) {
         return value;
     } else if (rule.type === 'string') {
         // 字符串处理
-        return applyStringTransform(value, rule);
+        return applyStringTransform(value, rule, errors);
     } else if (rule.type === 'date') {
         // 日期转换
         return applyDateTransform(value, rule);
@@ -191,8 +209,11 @@ function applyValueTransformForOutput(value, rule) {
 function transformData(source, target, mapping, valueRules) {
     const result = {
         headerValues: [],
-        dataRows: []
+        dataRows: [],
+        transformErrors: []
     };
+    
+    const errors = result.transformErrors;
     
     target.headerKeyValues.forEach(hkv => {
         result.headerValues.push({
@@ -250,7 +271,7 @@ function transformData(source, target, mapping, valueRules) {
                                 }
                             } else if (rule.type === 'string') {
                                 // 字符串处理
-                                value = applyStringTransform(value, rule);
+                                value = applyStringTransform(value, rule, errors);
                             } else if (rule.type === 'date') {
                                 // 日期转换
                                 value = applyDateTransform(value, rule);
@@ -279,6 +300,7 @@ function transformData(source, target, mapping, valueRules) {
 
 function buildOutputRows(target, transformedData, mapping, originalTargetData) {
     const rows = [];
+    const transformErrors = [];
     const targetHeaders = target.dataHeaders || [];
     const columnHeaderRows = target.columnHeaderRows || [];
     
@@ -354,7 +376,7 @@ function buildOutputRows(target, transformedData, mapping, originalTargetData) {
                     // 应用值转换规则
                     if (m.valueTransformRules && Array.isArray(m.valueTransformRules)) {
                         m.valueTransformRules.forEach(rule => {
-                            sourceValue = applyValueTransformForOutput(sourceValue, rule);
+                            sourceValue = applyValueTransformForOutput(sourceValue, rule, transformErrors);
                         });
                     }
                     rowData[m.targetIndex] = sourceValue;
@@ -393,7 +415,7 @@ function buildOutputRows(target, transformedData, mapping, originalTargetData) {
         console.log(`  添加结束行及之后内容: 从第${target.endRow + 1}行开始`);
     }
     
-    return rows;
+    return { rows, transformErrors };
 }
 
 function writeOutputFile(outputRows, targetSheetName, outputPath, targetAnalysis) {

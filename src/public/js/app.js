@@ -254,7 +254,9 @@
                                 <tr>
                                     ${targetHeaders.map((h, i) => {
                                         const mapping = currentActiveMappings.find(m => m.targetIndex === i);
-                                        const hasTransformRules = mapping ? !!previewValueTransformRules[`${mapping.sourceIndex}_${i}`] : false;
+                                        const rules = mapping ? previewValueTransformRules[`${mapping.sourceIndex}_${i}`] : null;
+                                        const validRules = rules ? rules.filter(isValidTransformRule) : [];
+                                        const hasTransformRules = validRules.length > 0;
                                         const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
                                         return `<td data-index="${i}" id="target-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; ${hasTransformRules ? 'background-color: #fff3cd;' : ''}">${escapeHtml(displayValue)}</td>`;
                                     }).join('')}
@@ -471,7 +473,9 @@
                 svg.appendChild(startCircle);
                 
                 // 检查是否有转换规则
-                const hasTransformRules = !!previewValueTransformRules[`${mapping.sourceIndex}_${mapping.targetIndex}`];
+                const rules = previewValueTransformRules[`${mapping.sourceIndex}_${mapping.targetIndex}`];
+                const validRules = rules ? rules.filter(isValidTransformRule) : [];
+                const hasTransformRules = validRules.length > 0;
                 
                 // 添加终点圆点
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1179,6 +1183,18 @@
             currentTransformField = null;
         }
         
+        function validateRegex(pattern) {
+            if (!pattern || pattern.trim() === '') {
+                return { valid: false, error: '请输入正则表达式' };
+            }
+            try {
+                new RegExp(pattern);
+                return { valid: true, error: null };
+            } catch (e) {
+                return { valid: false, error: e.message };
+            }
+        }
+        
         function renderTransformRules(rules) {
             const tbody = document.getElementById('transformRulesBody');
             
@@ -1215,6 +1231,15 @@
                         targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="目标值如：身份证">`;
                         break;
                     case 'string':
+                        let extractValidation = '';
+                        if (rule.operation === 'extract' && rule.params) {
+                            const validation = validateRegex(rule.params);
+                            if (validation.valid) {
+                                extractValidation = `<span style="color: #27ae60; margin-left: 5px;">✓ 有效</span>`;
+                            } else {
+                                extractValidation = `<span style="color: #e74c3c; margin-left: 5px;" title="${escapeHtml(validation.error)}">✗ 无效</span>`;
+                            }
+                        }
                         sourceInput = `
                             <select onchange="updateTransformRule(${idx}, 'operation', this.value)" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
                                 <option value="substring" ${rule.operation === 'substring' ? 'selected' : ''}>截取字符串</option>
@@ -1226,7 +1251,7 @@
                             </select>
                             ${rule.operation === 'substring' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="起始位置,长度 (如: 0,5)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
                             ${rule.operation === 'replace' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="查找,替换 (如: a,b)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
-                            ${rule.operation === 'extract' ? `<input type="text" value="${escapeHtml(rule.params || '')}" onchange="updateTransformRule(${idx}, 'params', this.value)" placeholder="正则表达式 (如: (\\d{4})年)" style="margin-top: 5px; width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">` : ''}
+                            ${rule.operation === 'extract' ? `<div style="margin-top: 5px;"><input type="text" value="${escapeHtml(rule.params || '')}" oninput="updateTransformRule(${idx}, 'params', this.value)" placeholder="正则表达式 (如: (\\d{4})年)" style="width: calc(100% - 60px); padding: 6px; border: 1px solid #ddd; border-radius: 4px;">${extractValidation}</div>` : ''}
                         `;
                         targetInput = `<input type="text" value="${escapeHtml(rule.target || '')}" onchange="updateTransformRule(${idx}, 'target', this.value)" placeholder="默认值（可选）">`;
                         break;
@@ -1311,10 +1336,7 @@
             const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
             if (valueTransformRules[key] && valueTransformRules[key][idx]) {
                 valueTransformRules[key][idx][field] = value;
-                if (field === 'type') {
-                    renderTransformRules(valueTransformRules[key]);
-                }
-                if (field === 'operation') {
+                if (field === 'type' || field === 'operation' || field === 'params') {
                     renderTransformRules(valueTransformRules[key]);
                 }
             }
@@ -1332,11 +1354,34 @@
             const key = `${currentTransformField.sourceIndex}_${currentTransformField.targetIndex}`;
             const rules = valueTransformRules[key] || [];
             
+            const invalidRules = [];
+            
+            rules.forEach((r, idx) => {
+                if (r.type === 'string' && r.operation === 'extract' && r.params) {
+                    const validation = validateRegex(r.params);
+                    if (!validation.valid) {
+                        invalidRules.push({
+                            index: idx + 1,
+                            error: validation.error
+                        });
+                    }
+                }
+            });
+            
+            if (invalidRules.length > 0) {
+                const errorMessages = invalidRules.map(r => `第${r.index}条规则: ${r.error}`).join('\n');
+                alert(`以下正则表达式无效，请修正后再保存：\n\n${errorMessages}`);
+                return;
+            }
+            
             valueTransformRules[key] = rules.filter(r => {
                 switch (r.type) {
                     case 'simple':
                         return r.source && r.source.trim() !== '' && r.target && r.target.trim() !== '';
                     case 'string':
+                        if (r.operation === 'extract') {
+                            return r.operation && r.params && r.params.trim() !== '';
+                        }
                         return r.operation;
                     case 'date':
                         return r.targetFormat && r.targetFormat.trim() !== '';
@@ -1349,9 +1394,35 @@
                 }
             });
             
+            // 如果过滤后为空数组，删除这个 key
+            if (valueTransformRules[key].length === 0) {
+                delete valueTransformRules[key];
+            }
+            
             updateFieldTransformIndicator(currentTransformField.sourceIndex, currentTransformField.targetIndex);
             
             closeValueTransformModal();
+        }
+        
+        function isValidTransformRule(rule) {
+            if (!rule) return false;
+            switch (rule.type) {
+                case 'simple':
+                    return rule.source && rule.source.trim() !== '' && rule.target && rule.target.trim() !== '';
+                case 'string':
+                    if (rule.operation === 'extract') {
+                        return rule.operation && rule.params && rule.params.trim() !== '';
+                    }
+                    return rule.operation;
+                case 'date':
+                    return rule.targetFormat && rule.targetFormat.trim() !== '';
+                case 'number':
+                    return rule.operation;
+                case 'logic':
+                    return rule.expression && rule.expression.trim() !== '';
+                default:
+                    return false;
+            }
         }
         
         function updateFieldTransformIndicator(sourceIndex, targetIndex) {
@@ -1363,11 +1434,12 @@
                 const oldIndicator = sourceEl.querySelector('.transform-indicator');
                 if (oldIndicator) oldIndicator.remove();
                 
-                if (rules && rules.length > 0) {
+                const validRules = rules ? rules.filter(isValidTransformRule) : [];
+                if (validRules.length > 0) {
                     const indicator = document.createElement('span');
                     indicator.className = 'transform-indicator';
-                    indicator.textContent = `🔄${rules.length}`;
-                    indicator.title = `已配置 ${rules.length} 条值转换规则`;
+                    indicator.textContent = `🔄${validRules.length}`;
+                    indicator.title = `已配置 ${validRules.length} 条值转换规则`;
                     indicator.onclick = (e) => {
                         e.stopPropagation();
                         openValueTransformModal(sourceIndex, targetIndex);
@@ -2073,9 +2145,22 @@
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
-                    showSuccess(`成功转换 ${data.dataRowCount} 行数据！`);
-                    showResult('✅ 转换完成', 
-                        `成功转换 ${data.dataRowCount} 行数据\n文件名: ${data.fileName}\n文件大小: ${data.fileSize}`);
+                    if (data.transformErrors && data.transformErrors.length > 0) {
+                        const errorDetails = data.transformErrors.slice(0, 5).map(e => {
+                            const type = e.type || 'unknown';
+                            const pattern = e.pattern || '';
+                            const errorMsg = e.error || '未知错误';
+                            return `• ${type === 'extract' ? '正则提取' : type === 'replace' ? '正则替换' : type}: ${pattern} - ${errorMsg}`;
+                        }).join('\n');
+                        const moreErrors = data.transformErrors.length > 5 ? `\n...还有 ${data.transformErrors.length - 5} 个错误` : '';
+                        showSuccess(`成功转换 ${data.dataRowCount} 行数据！`);
+                        showResult('⚠️ 转换完成（有警告）', 
+                            `成功转换 ${data.dataRowCount} 行数据\n文件名: ${data.fileName}\n文件大小: ${data.fileSize}\n\n以下转换规则执行失败：\n${errorDetails}${moreErrors}`);
+                    } else {
+                        showSuccess(`成功转换 ${data.dataRowCount} 行数据！`);
+                        showResult('✅ 转换完成', 
+                            `成功转换 ${data.dataRowCount} 行数据\n文件名: ${data.fileName}\n文件大小: ${data.fileSize}`);
+                    }
                     const step4 = document.getElementById('step4');
                     step4.classList.add('completed');
                 } else {
@@ -2236,6 +2321,16 @@
                 });
             });
             
+            // 过滤掉空数组和无效规则
+            const cleanedValueTransformRules = {};
+            Object.keys(valueTransformRules).forEach(key => {
+                const rules = valueTransformRules[key];
+                const validRules = rules ? rules.filter(isValidTransformRule) : [];
+                if (validRules.length > 0) {
+                    cleanedValueTransformRules[key] = validRules;
+                }
+            });
+            
             const config = {
                 id: existingId || Date.now(),
                 name: name,
@@ -2243,7 +2338,7 @@
                 sourceHeaders: previewData.sourceHeaders,
                 targetHeaders: previewData.targetHeaders,
                 mappings: finalMappings,
-                valueTransformRules: valueTransformRules
+                valueTransformRules: cleanedValueTransformRules
             };
             
             const configs = getConfigs();

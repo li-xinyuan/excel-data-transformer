@@ -417,12 +417,15 @@ async function handleConfirm(req, res, server, resolvePromise) {
                     }
                     
                     // 构建输出数据
-                    const outputRows = buildOutputRows(
+                    const outputResult = buildOutputRows(
                         req.session.targetAnalysis,
                         req.session.sourceAnalysis,
                         mapping,
                         req.session.targetData
                     );
+                    
+                    const outputRows = outputResult.rows;
+                    const transformErrors = outputResult.transformErrors;
                     
                     // 写入输出文件
                     const wb = writeOutputFile(
@@ -447,10 +450,11 @@ async function handleConfirm(req, res, server, resolvePromise) {
                         fileData: fileData,
                         fileName: fileName,
                         fileSize: (buffer.length / 1024).toFixed(1) + ' KB',
-                        dataRowCount: outputRows.length
+                        dataRowCount: outputRows.length,
+                        transformErrors: transformErrors.length > 0 ? transformErrors : undefined
                     }));
                     
-                    logger.info({ sessionId: req.sessionId, rowCount: outputRows.length }, '数据转换完成');
+                    logger.info({ sessionId: req.sessionId, rowCount: outputRows.length, errors: transformErrors.length }, '数据转换完成');
                     return;
                 }
                 
