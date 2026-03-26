@@ -25,7 +25,83 @@
         let currentPreviewTab = 'source';
         let currentActiveMappings = [];
         let previewValueTransformRules = {}; // 存储预览数据的值转换规则
-        let currentRowIndex = 0; // 当前显示的行号（源数据和目标数据共用，从 0 开始）
+        let currentRowIndex = 0; // 当前显示的行号（源数据和目标数据和目标数据共用，从 0 开始）
+        let problemRows = []; // 存储有必填字段缺失的行号列表
+        
+        // 计算有必填字段缺失的行
+        function calculateProblemRows(previewData, mappings) {
+            const problems = [];
+            const targetHeaders = previewData.target.headers;
+            const targetRows = previewData.target.rows;
+            
+            // 找出所有必填字段的索引
+            const requiredFieldIndices = [];
+            targetHeaders.forEach((h, i) => {
+                if (h.endsWith('*')) {
+                    requiredFieldIndices.push(i);
+                }
+            });
+            
+            // 如果没有必填字段，返回空数组
+            if (requiredFieldIndices.length === 0) {
+                return problems;
+            }
+            
+            // 遍历每一行，检查必填字段是否有值
+            targetRows.forEach((row, rowIdx) => {
+                let hasProblem = false;
+                for (const idx of requiredFieldIndices) {
+                    const header = targetHeaders[idx];
+                    const value = row[header];
+                    if (value === '' || value === null || value === undefined) {
+                        hasProblem = true;
+                        break;
+                    }
+                }
+                if (hasProblem) {
+                    problems.push(rowIdx);
+                }
+            });
+            
+            return problems;
+        }
+        
+        // 跳转到上一个/下一个问题行
+        function gotoProblemRow(direction) {
+            if (problemRows.length === 0) return;
+            
+            let targetIdx = -1;
+            
+            if (direction === 'prev') {
+                // 找小于当前行号的最大值
+                for (let i = problemRows.length - 1; i >= 0; i--) {
+                    if (problemRows[i] < currentRowIndex) {
+                        targetIdx = problemRows[i];
+                        break;
+                    }
+                }
+                // 如果没找到，跳转到最后一个问题行（循环）
+                if (targetIdx === -1) {
+                    targetIdx = problemRows[problemRows.length - 1];
+                }
+            } else {
+                // 找大于当前行号的最小值
+                for (let i = 0; i < problemRows.length; i++) {
+                    if (problemRows[i] > currentRowIndex) {
+                        targetIdx = problemRows[i];
+                        break;
+                    }
+                }
+                // 如果没找到，跳转到第一个问题行（循环）
+                if (targetIdx === -1) {
+                    targetIdx = problemRows[0];
+                }
+            }
+            
+            if (targetIdx !== -1) {
+                gotoRow(targetIdx + 1);
+            }
+        }
         
         // 显示数据预览
         async function showDataPreview() {
@@ -67,6 +143,8 @@
                     previewValueTransformRules = result.valueTransformRules || {};
                     // 重置行号为第 1 行
                     currentRowIndex = 0;
+                    // 计算有必填字段缺失的行
+                    problemRows = calculateProblemRows(result.previewData, result.activeMappings);
                     
                     // 显示统计信息
                     const statsEl = document.getElementById('previewStatistics');
@@ -75,6 +153,7 @@
                             <div class="preview-stat-item">总行数：<strong>${result.statistics.totalRows}</strong></div>
                             <div class="preview-stat-item">预览行数：<strong id="previewRowNumber">${currentRowIndex + 1} / ${result.statistics.totalRows}</strong></div>
                             <div class="preview-stat-item">已映射字段：<strong>${result.statistics.mappedFields}</strong></div>
+                            ${problemRows.length > 0 ? `<div class="preview-stat-item" style="color: #e74c3c;">必填缺失行：<strong>${problemRows.length}</strong></div>` : ''}
                         `;
                     }
                     
@@ -208,12 +287,15 @@
                 <div class="comparison-panel" style="display: flex; align-items: flex-start; gap: 10px;">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
                         <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📥 源数据</div>
-                        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
-                            <button onclick="changeRow(-1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▲</button>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
+                            <button onclick="changeRow(-1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="上一行">▲</button>
+                            <button onclick="gotoProblemRow('prev')" style="width: 20px; height: 20px; border: 1px solid #e74c3c; background: #ffebee; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; color: #e74c3c;" title="上一个必填缺失行">▲</button>
                             <input type="number" id="rowIndex" value="${currentRowIndex + 1}" min="1" max="${Math.max(sourceRows.length, targetRows.length)}" onchange="gotoRow(this.value)" style="width: 45px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px 2px; font-size: 13px; -moz-appearance: textfield; -webkit-appearance: none; appearance: none;" />
-                            <button onclick="changeRow(1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;">▼</button>
+                            <button onclick="gotoProblemRow('next')" style="width: 20px; height: 20px; border: 1px solid #e74c3c; background: #ffebee; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; color: #e74c3c;" title="下一个必填缺失行">▼</button>
+                            <button onclick="changeRow(1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="下一行">▼</button>
                         </div>
                         <div style="font-size: 11px; color: #999;">/${sourceRows.length}</div>
+                        <div style="font-size: 10px; color: #999; text-align: center; max-width: 60px; margin-top: 5px; line-height: 1.3;">红色箭头跳转必填缺失行</div>
                     </div>
                     <div style="flex: 1; overflow: auto;">
                         <table class="preview-table" id="sourcePreviewTable">
@@ -245,9 +327,17 @@
                         <table class="preview-table" id="targetPreviewTable">
                             <thead>
                                 <tr>
-                                    ${targetHeaders.map((h, i) => 
-                                        `<th data-index="${i}" id="target-th-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(h)}</th>`
-                                    ).join('')}
+                                    ${targetHeaders.map((h, i) => {
+                                        const isRequired = h.endsWith('*');
+                                        const mapping = currentActiveMappings.find(m => m.targetIndex === i);
+                                        const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
+                                        const isEmptyValue = displayValue === '' || displayValue === null || displayValue === undefined;
+                                        const isRequiredAndEmpty = isRequired && isEmptyValue;
+                                        const thStyle = isRequiredAndEmpty 
+                                            ? 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; background-color: #ffcccc; border: 2px solid #e74c3c;'
+                                            : 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;';
+                                        return `<th data-index="${i}" id="target-th-${i}" style="${thStyle}" title="${isRequiredAndEmpty ? '必填字段值为空' : ''}">${escapeHtml(h)}</th>`;
+                                    }).join('')}
                                 </tr>
                             </thead>
                             <tbody>
@@ -600,6 +690,8 @@
         let selectedSourceField = null;
         let fieldElements = { source: {}, target: {} };
         let valueTransformRules = {};
+        let defaultValues = {};  // 目标字段默认值 { targetIndex: defaultValue }
+        let logicRules = {};     // 目标字段逻辑规则 { targetIndex: logicRuleObject }
         let currentTransformField = null;
         let sourceSampleData = null;
         let configHasChanges = false;
@@ -747,6 +839,8 @@
                     removedMappings = [];
                     selectedSourceField = null;
                     valueTransformRules = {};
+                    defaultValues = {};
+                    logicRules = {};
                     currentLoadedConfig = null;
                     
                     const statsPanel = document.getElementById('statsPanel');
@@ -1453,6 +1547,10 @@
             const container = document.getElementById('targetTableContainer');
             const list = document.getElementById('targetFields');
             
+            console.log('[RenderTargetFields] 开始渲染，字段数量:', data.headers.length);
+            console.log('[RenderTargetFields] 当前 defaultValues:', defaultValues);
+            console.log('[RenderTargetFields] 当前 logicRules:', logicRules);
+            
             list.innerHTML = '';
             fieldElements.target = {};
             
@@ -1469,15 +1567,66 @@
                 
                 const columnLetter = numberToExcelColumn(idx + 1);
                 
+                const hasDefault = defaultValues[idx] !== undefined || defaultValues[String(idx)] !== undefined;
+                const hasLogic = logicRules[idx] !== undefined || logicRules[String(idx)] !== undefined;
+                
+                console.log(`[RenderTargetFields] 字段 ${idx} (${displayHeader}):`, {
+                    isRequired,
+                    hasDefault,
+                    hasLogic,
+                    defaultValue: defaultValues[idx] || defaultValues[String(idx)],
+                    defaultValues_num: defaultValues[idx],
+                    defaultValues_str: defaultValues[String(idx)]
+                });
+                
+                let statusMark = '';
+                if (hasDefault) {
+                    const defaultValue = defaultValues[idx] !== undefined ? defaultValues[idx] : defaultValues[String(idx)];
+                    statusMark = `<span class="default-value-mark" title="默认值：${escapeHtml(defaultValue)}">📝</span>`;
+                } else if (hasLogic) {
+                    statusMark = `<span class="logic-rule-mark" title="已设置逻辑规则">🔀</span>`;
+                }
+                
                 li.innerHTML = `
                     <div class="connection-point new" data-type="target" data-index="${idx}"></div>
                     <span class="field-index">${columnLetter}</span>
                     <span class="field-name">${escapeHtml(displayHeader)}</span>
+                    ${statusMark}
                 `;
                 
                 if (isRequired) {
                     li.classList.add('required');
+                    const hasMapping = manualMappings.some(m => m.target === idx) || 
+                        (previewData && previewData.mappings && previewData.mappings.some(m => m.targetIndex === idx && !removedMappings.some(r => r.targetIndex === idx)));
+                    console.log(`[RenderTargetFields] 字段 ${idx} 必填检查:`, { hasMapping, hasDefault, hasLogic });
+                    console.log(`[RenderTargetFields] 字段 ${idx} 当前类名:`, li.className);
+                    if (hasMapping || hasDefault || hasLogic) {
+                        li.classList.add('mapped');
+                        console.log(`[RenderTargetFields] 字段 ${idx} 添加 mapped 类，当前类名:`, li.className);
+                    } else {
+                        li.classList.add('missing');
+                        console.log(`[RenderTargetFields] 字段 ${idx} 添加 missing 类，当前类名:`, li.className);
+                    }
+                } else {
+                    // 非必填字段不需要 mapped/missing 类
+                    li.classList.remove('mapped', 'missing');
+                    console.log(`[RenderTargetFields] 字段 ${idx} 非必填，移除 mapped/missing 类，当前类名:`, li.className);
                 }
+                
+                if (hasDefault) {
+                    li.classList.add('has-default');
+                    console.log(`[RenderTargetFields] 字段 ${idx} 添加 has-default 类，当前类名:`, li.className);
+                } else if (hasLogic) {
+                    li.classList.add('has-logic');
+                    console.log(`[RenderTargetFields] 字段 ${idx} 添加 has-logic 类，当前类名:`, li.className);
+                }
+                
+                console.log(`[RenderTargetFields] 字段 ${idx} 最终类名:`, li.className);
+                
+                li.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    showTargetFieldContextMenu(e, idx, header.trim());
+                });
                 
                 list.appendChild(li);
                 fieldElements.target[idx] = li;
@@ -1625,12 +1774,14 @@
                 const idx = parseInt(el.dataset.index);
                 const isRequired = el.dataset.isRequired === 'true';
                 const isMapped = mappedTargetIndices.has(idx);
+                const hasDefault = defaultValues[idx] !== undefined || defaultValues[String(idx)] !== undefined;
+                const hasLogic = logicRules[idx] !== undefined || logicRules[String(idx)] !== undefined;
                 
                 el.classList.remove('mapped', 'missing');
                 
                 const connectionPoint = el.querySelector('.connection-point');
                 if (connectionPoint) {
-                    if (isMapped) {
+                    if (isMapped || hasDefault || hasLogic) {
                         connectionPoint.classList.remove('new');
                     } else {
                         connectionPoint.classList.add('new');
@@ -1638,7 +1789,7 @@
                 }
                 
                 if (isRequired) {
-                    if (isMapped) {
+                    if (isMapped || hasDefault || hasLogic) {
                         el.classList.add('mapped');
                     } else {
                         el.classList.add('missing');
@@ -1731,6 +1882,359 @@
             updateSteps();
         }
         
+        // ========== 右键菜单和弹窗函数 ==========
+        let contextMenu = null;
+        
+        function showTargetFieldContextMenu(e, targetIndex, targetField) {
+            if (contextMenu) {
+                contextMenu.remove();
+            }
+            
+            const hasMapping = manualMappings.some(m => m.target === targetIndex) || 
+                (previewData && previewData.mappings && previewData.mappings.some(m => m.targetIndex === targetIndex && !removedMappings.some(r => r.targetIndex === targetIndex)));
+            const hasDefault = defaultValues[targetIndex] !== undefined;
+            const hasLogic = logicRules[targetIndex] !== undefined;
+            
+            contextMenu = document.createElement('div');
+            contextMenu.style.cssText = `
+                position: fixed;
+                left: ${e.clientX}px;
+                top: ${e.clientY}px;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 10000;
+                min-width: 180px;
+                padding: 8px 0;
+            `;
+            
+            const menuItems = [];
+            
+            menuItems.push({
+                icon: '📝',
+                text: hasDefault ? '修改默认值...' : '设置默认值...',
+                action: () => openDefaultValueModal(targetIndex, targetField)
+            });
+            
+            menuItems.push({
+                icon: '🔀',
+                text: hasLogic ? '修改逻辑规则...' : '设置逻辑规则...',
+                action: () => openLogicRuleModal(targetIndex, targetField)
+            });
+            
+            if (hasDefault || hasLogic) {
+                menuItems.push({ divider: true });
+                menuItems.push({
+                    icon: '🗑️',
+                    text: '清除默认值/逻辑规则',
+                    action: () => clearDefaultValueOrLogic(targetIndex)
+                });
+            }
+            
+            if (hasMapping) {
+                menuItems.push({ divider: true });
+                menuItems.push({
+                    icon: '❌',
+                    text: '删除映射',
+                    action: () => {
+                        if (confirm('确定要删除这条映射关系吗？')) {
+                            removeMapping(targetIndex);
+                            // 关闭右键菜单
+                            if (contextMenu) {
+                                contextMenu.remove();
+                                contextMenu = null;
+                            }
+                        }
+                    }
+                });
+            }
+            
+            menuItems.forEach(item => {
+                if (item.divider) {
+                    const divider = document.createElement('div');
+                    divider.style.cssText = 'height: 1px; background: #eee; margin: 4px 12px;';
+                    contextMenu.appendChild(divider);
+                } else {
+                    const menuItem = document.createElement('div');
+                    menuItem.style.cssText = `
+                        padding: 8px 16px;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        font-size: 14px;
+                        color: #333;
+                    `;
+                    menuItem.innerHTML = `<span>${item.icon}</span><span>${item.text}</span>`;
+                    menuItem.addEventListener('mouseenter', () => {
+                        menuItem.style.background = '#f5f5f5';
+                    });
+                    menuItem.addEventListener('mouseleave', () => {
+                        menuItem.style.background = 'transparent';
+                    });
+                    menuItem.addEventListener('click', () => {
+                        item.action();
+                        contextMenu.remove();
+                        contextMenu = null;
+                    });
+                    contextMenu.appendChild(menuItem);
+                }
+            });
+            
+            document.body.appendChild(contextMenu);
+            
+            const closeMenu = (ev) => {
+                if (!contextMenu || contextMenu.contains(ev.target)) return;
+                contextMenu.remove();
+                contextMenu = null;
+                document.removeEventListener('click', closeMenu);
+            };
+            
+            setTimeout(() => {
+                document.addEventListener('click', closeMenu);
+            }, 0);
+        }
+        
+        function openDefaultValueModal(targetIndex, targetField) {
+            const currentValue = defaultValues[targetIndex] || '';
+            
+            const modalHtml = `
+                <div class="modal-overlay" id="defaultValueModalOverlay" onclick="closeDefaultValueModal(event)" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10001;">
+                    <div class="modal-content" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; padding: 24px; min-width: 400px; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="margin: 0; font-size: 18px; color: #333;">📝 设置默认值</h3>
+                            <button onclick="closeDefaultValueModal()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #999;">×</button>
+                        </div>
+                        
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">目标字段</label>
+                            <div style="padding: 10px 12px; background: #f5f5f5; border-radius: 6px; color: #333;">${escapeHtml(targetField)}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">默认值</label>
+                            <input type="text" id="defaultValueInput" value="${escapeHtml(currentValue)}" placeholder="请输入默认值" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                        </div>
+                        
+                        <div style="margin-bottom: 20px; padding: 12px; background: #fff3cd; border-radius: 6px; font-size: 13px; color: #856404;">
+                            💡 设置后，该字段将始终使用此默认值，无需映射源字段。
+                        </div>
+                        
+                        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                            <button onclick="closeDefaultValueModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 14px;">取消</button>
+                            <button onclick="saveDefaultValue(${targetIndex})" style="padding: 10px 20px; border: none; background: #4361ee; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">确定</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            setTimeout(() => document.getElementById('defaultValueInput').focus(), 100);
+        }
+        
+        function closeDefaultValueModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('defaultValueModalOverlay');
+            if (modal) modal.remove();
+        }
+        
+        function saveDefaultValue(targetIndex) {
+            const value = document.getElementById('defaultValueInput').value.trim();
+            
+            if (manualMappings.some(m => m.target === targetIndex)) {
+                if (!confirm('该字段已有映射关系，设置默认值将移除映射。确定继续？')) {
+                    return;
+                }
+                removeMapping(targetIndex);
+            }
+            
+            delete logicRules[targetIndex];
+            
+            if (value) {
+                defaultValues[targetIndex] = value;
+            } else {
+                delete defaultValues[targetIndex];
+            }
+            
+            closeDefaultValueModal();
+            renderTargetFields({ headers: previewData.targetHeaders });
+            drawMappings();
+            updateStats();
+            markConfigChanged();
+        }
+        
+        function openLogicRuleModal(targetIndex, targetField) {
+            const currentRule = logicRules[targetIndex] || { conditions: [], defaultResult: '' };
+            const sourceFields = previewData ? previewData.sourceHeaders : [];
+            
+            let conditionsHtml = '';
+            currentRule.conditions.forEach((cond, idx) => {
+                conditionsHtml += `
+                    <div class="condition-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px; background: #f9f9f9; border-radius: 6px;">
+                        <span style="color: #666; font-size: 13px;">如果</span>
+                        <select class="condition-source" style="flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            ${sourceFields.map((f, i) => `<option value="${i}" ${cond.sourceIndex == i ? 'selected' : ''}>${escapeHtml(f)}</option>`).join('')}
+                        </select>
+                        <select class="condition-operator" style="width: 60px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value=">" ${cond.operator === '>' ? 'selected' : ''}>></option>
+                            <option value=">=" ${cond.operator === '>=' ? 'selected' : ''}>>=</option>
+                            <option value="<" ${cond.operator === '<' ? 'selected' : ''}><</option>
+                            <option value="<=" ${cond.operator === '<=' ? 'selected' : ''}><=</option>
+                            <option value="==" ${cond.operator === '==' ? 'selected' : ''}>=</option>
+                            <option value="!=" ${cond.operator === '!=' ? 'selected' : ''}>!=</option>
+                            <option value="contains" ${cond.operator === 'contains' ? 'selected' : ''}>包含</option>
+                        </select>
+                        <input type="text" class="condition-value" value="${escapeHtml(cond.value || '')}" placeholder="值" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
+                        <span style="color: #666; font-size: 13px;">则</span>
+                        <input type="text" class="condition-result" value="${escapeHtml(cond.result || '')}" placeholder="结果" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
+                        <button type="button" onclick="this.closest('.condition-row').remove()" style="background: #ffebee; border: none; color: #e74c3c; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+                    </div>
+                `;
+            });
+            
+            const modalHtml = `
+                <div class="modal-overlay" id="logicRuleModalOverlay" onclick="closeLogicRuleModal(event)" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10001;">
+                    <div class="modal-content" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; padding: 24px; min-width: 550px; max-width: 650px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); max-height: 80vh; overflow-y: auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="margin: 0; font-size: 18px; color: #333;">🔀 设置逻辑规则</h3>
+                            <button onclick="closeLogicRuleModal()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #999;">×</button>
+                        </div>
+                        
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">目标字段</label>
+                            <div style="padding: 10px 12px; background: #f5f5f5; border-radius: 6px; color: #333;">${escapeHtml(targetField)}</div>
+                        </div>
+                        
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">条件规则</label>
+                            <div id="conditionsContainer">${conditionsHtml || '<div style="color: #999; font-size: 13px; padding: 10px;">暂无条件规则</div>'}</div>
+                            <button type="button" onclick="addConditionRow()" style="margin-top: 8px; padding: 8px 16px; border: 1px dashed #4361ee; background: white; color: #4361ee; border-radius: 6px; cursor: pointer; font-size: 13px;">+ 添加条件</button>
+                        </div>
+                        
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">默认值（无匹配时）</label>
+                            <input type="text" id="logicDefaultResult" value="${escapeHtml(currentRule.defaultResult || '')}" placeholder="请输入默认值" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                        </div>
+                        
+                        <div style="margin-bottom: 20px; padding: 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1565c0;">
+                            💡 根据其他字段的值动态计算结果。当所有条件都不满足时，使用默认值。
+                        </div>
+                        
+                        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                            <button onclick="closeLogicRuleModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 14px;">取消</button>
+                            <button onclick="saveLogicRule(${targetIndex})" style="padding: 10px 20px; border: none; background: #4361ee; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">确定</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+        
+        function closeLogicRuleModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('logicRuleModalOverlay');
+            if (modal) modal.remove();
+        }
+        
+        function addConditionRow() {
+            const container = document.getElementById('conditionsContainer');
+            const sourceFields = previewData ? previewData.sourceHeaders : [];
+            
+            if (container.querySelector('div[style*="color: #999"]')) {
+                container.innerHTML = '';
+            }
+            
+            const row = document.createElement('div');
+            row.className = 'condition-row';
+            row.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px; background: #f9f9f9; border-radius: 6px;';
+            row.innerHTML = `
+                <span style="color: #666; font-size: 13px;">如果</span>
+                <select class="condition-source" style="flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    ${sourceFields.map((f, i) => `<option value="${i}">${escapeHtml(f)}</option>`).join('')}
+                </select>
+                <select class="condition-operator" style="width: 60px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value=">">></option>
+                    <option value=">=">>=</option>
+                    <option value="<"><</option>
+                    <option value="<="><=</option>
+                    <option value=">==</option>
+                    <option value="!=">!=</option>
+                    <option value="contains">包含</option>
+                </select>
+                <input type="text" class="condition-value" placeholder="值" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
+                <span style="color: #666; font-size: 13px;">则</span>
+                <input type="text" class="condition-result" placeholder="结果" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
+                <button type="button" onclick="this.closest('.condition-row').remove()" style="background: #ffebee; border: none; color: #e74c3c; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+            `;
+            container.appendChild(row);
+        }
+        
+        function saveLogicRule(targetIndex) {
+            const container = document.getElementById('conditionsContainer');
+            const conditionRows = container.querySelectorAll('.condition-row');
+            const conditions = [];
+            
+            conditionRows.forEach(row => {
+                const sourceIndex = parseInt(row.querySelector('.condition-source').value);
+                const operator = row.querySelector('.condition-operator').value;
+                const value = row.querySelector('.condition-value').value.trim();
+                const result = row.querySelector('.condition-result').value.trim();
+                
+                if (value && result) {
+                    conditions.push({ sourceIndex, operator, value, result });
+                }
+            });
+            
+            const defaultResult = document.getElementById('logicDefaultResult').value.trim();
+            
+            if (conditions.length === 0 && !defaultResult) {
+                alert('请至少添加一条条件规则或设置默认值');
+                return;
+            }
+            
+            if (manualMappings.some(m => m.target === targetIndex)) {
+                if (!confirm('该字段已有映射关系，设置逻辑规则将移除映射。确定继续？')) {
+                    return;
+                }
+                removeMapping(targetIndex);
+            }
+            
+            delete defaultValues[targetIndex];
+            
+            if (conditions.length > 0 || defaultResult) {
+                logicRules[targetIndex] = { conditions, defaultResult };
+            } else {
+                delete logicRules[targetIndex];
+            }
+            
+            closeLogicRuleModal();
+            renderTargetFields({ headers: previewData.targetHeaders });
+            drawMappings();
+            updateStats();
+            markConfigChanged();
+        }
+        
+        function clearDefaultValueOrLogic(targetIndex) {
+            if (!confirm('确定要清除该字段的默认值/逻辑规则吗？')) {
+                return;
+            }
+            delete defaultValues[targetIndex];
+            delete logicRules[targetIndex];
+            
+            // 关闭右键菜单
+            if (contextMenu) {
+                contextMenu.remove();
+                contextMenu = null;
+            }
+            
+            renderTargetFields({ headers: previewData.targetHeaders });
+            drawMappings();
+            updateStats();
+            markConfigChanged();
+        }
+        
         function removeMapping(targetIndex) {
             const mapping = previewData.mappings.find(m => m.targetIndex === targetIndex);
             if (mapping) {
@@ -1777,7 +2281,8 @@
             const missingCount = (previewData.missingFields || []).length - 
                 manualMappings.filter(m => (previewData.missingFields || []).some(f => f.index === m.target)).length;
             
-            const mappedRequiredCount = (previewData.mappings || []).filter(m => {
+            // 计算已映射的必填字段数量（包括有默认值或逻辑规则的字段）
+            let mappedRequiredCount = (previewData.mappings || []).filter(m => {
                 if (removedMappings.some(r => r.targetIndex === m.targetIndex)) return false;
                 if (m.matchType === 'manual') return false;
                 const header = previewData.targetHeaders[m.targetIndex];
@@ -1786,6 +2291,22 @@
                 const header = previewData.targetHeaders[m.target];
                 return header && header.includes('*');
             }).length;
+            
+            // 加上有默认值的必填字段
+            Object.keys(defaultValues).forEach(idx => {
+                const header = previewData.targetHeaders[idx];
+                if (header && header.includes('*')) {
+                    mappedRequiredCount++;
+                }
+            });
+            
+            // 加上有逻辑规则的必填字段（避免重复计算）
+            Object.keys(logicRules).forEach(idx => {
+                const header = previewData.targetHeaders[idx];
+                if (header && header.includes('*') && defaultValues[idx] === undefined && defaultValues[String(idx)] === undefined) {
+                    mappedRequiredCount++;
+                }
+            });
             
             const totalRequiredCount = previewData.targetHeaders.filter(h => h && h.includes('*')).length;
             const requiredMissing = totalRequiredCount - mappedRequiredCount;
@@ -1871,6 +2392,15 @@
                 drawLine(mapping.source, mapping.target, 'manual', null, mappingRect, containerRect);
             });
             
+            // 添加双击画布空白区域无操作的提示
+            canvas.ondblclick = function(e) {
+                const btnDiv = e.target.closest('[data-source-idx]');
+                if (!btnDiv) {
+                    // 点击的是空白区域
+                    e.stopPropagation();
+                }
+            };
+            
             canvas.onclick = function(e) {
                 const btnDiv = e.target.closest('[data-source-idx]');
                 if (btnDiv) {
@@ -1939,10 +2469,31 @@
             path.dataset.midY = midY;
             canvas.appendChild(path);
             
-            hitPath.addEventListener('mouseenter', () => {
-                path.style.strokeWidth = '4';
-                sourceEl.style.transform = 'translateX(10px)';
-                targetEl.style.transform = 'translateX(-10px)';
+            const lineStartX = x1;
+            const lineStartY = y1;
+            const lineEndX = x2;
+            const lineEndY = y2;
+            const endpointThreshold = 35;
+            
+            hitPath.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                
+                const distToStart = Math.sqrt(Math.pow(mouseX - lineStartX, 2) + Math.pow(mouseY - lineStartY, 2));
+                const distToEnd = Math.sqrt(Math.pow(mouseX - lineEndX, 2) + Math.pow(mouseY - lineEndY, 2));
+                
+                if (distToStart < endpointThreshold || distToEnd < endpointThreshold) {
+                    path.style.strokeWidth = '2';
+                    sourceEl.style.transform = 'translateX(0)';
+                    targetEl.style.transform = 'translateX(0)';
+                    hitPath.style.cursor = 'default';
+                } else {
+                    path.style.strokeWidth = '4';
+                    sourceEl.style.transform = 'translateX(10px)';
+                    targetEl.style.transform = 'translateX(-10px)';
+                    hitPath.style.cursor = 'pointer';
+                }
             });
             
             hitPath.addEventListener('mouseleave', () => {
@@ -1953,24 +2504,37 @@
             
             hitPath.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (confirm('确定要删除这条映射关系吗？')) {
+            });
+            
+            // 双击删除连线
+            hitPath.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                const sourceField = previewData.sourceHeaders[sourceIdx];
+                const targetField = previewData.targetHeaders[targetIdx];
+                
+                if (confirm(`确定要删除这条映射关系吗？\n\n源字段：${sourceField}\n目标字段：${targetField}`)) {
                     removeMapping(targetIdx);
                 }
             });
+            
             canvas.appendChild(hitPath);
             
             const foreignObj = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
-            foreignObj.setAttribute('x', midX - 18);
+            foreignObj.setAttribute('x', midX - 35);
             foreignObj.setAttribute('y', midY - 18);
-            foreignObj.setAttribute('width', '36');
+            foreignObj.setAttribute('width', '70');
             foreignObj.setAttribute('height', '36');
             foreignObj.style.pointerEvents = 'none';
             
+            const btnContainer = document.createElement('div');
+            btnContainer.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:4px;pointer-events:auto;';
+            
             const btnDiv = document.createElement('div');
-            btnDiv.style.cssText = 'width:36px;height:36px;background:white;border:2px solid #667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;pointer-events:auto;transition:all 0.3s ease;';
+            btnDiv.style.cssText = 'width:28px;height:28px;background:white;border:2px solid #667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:all 0.3s ease;';
             btnDiv.textContent = '⚙';
             btnDiv.dataset.sourceIdx = sourceIdx;
             btnDiv.dataset.targetIdx = targetIdx;
+            btnDiv.title = '编辑转换规则';
             
             btnDiv.addEventListener('mouseenter', () => {
                 btnDiv.style.transform = 'scale(1.1)';
@@ -1989,7 +2553,36 @@
                 openValueTransformModal(sourceIdx, targetIdx);
             });
 
-            foreignObj.appendChild(btnDiv);
+            const deleteBtn = document.createElement('div');
+            deleteBtn.style.cssText = 'width:28px;height:28px;background:white;border:2px solid #e74c3c;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:#e74c3c;transition:all 0.3s ease;';
+            deleteBtn.textContent = '×';
+            deleteBtn.dataset.targetIdx = targetIdx;
+            deleteBtn.title = '删除映射';
+            
+            deleteBtn.addEventListener('mouseenter', () => {
+                deleteBtn.style.transform = 'scale(1.1)';
+                deleteBtn.style.boxShadow = '0 4px 12px rgba(231, 76, 60, 0.4)';
+                deleteBtn.style.background = '#e74c3c';
+                deleteBtn.style.color = 'white';
+            });
+
+            deleteBtn.addEventListener('mouseleave', () => {
+                deleteBtn.style.transform = 'scale(1)';
+                deleteBtn.style.boxShadow = 'none';
+                deleteBtn.style.background = 'white';
+                deleteBtn.style.color = '#e74c3c';
+            });
+
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm('确定要删除这条映射关系吗？')) {
+                    removeMapping(parseInt(deleteBtn.dataset.targetIdx));
+                }
+            });
+
+            btnContainer.appendChild(btnDiv);
+            btnContainer.appendChild(deleteBtn);
+            foreignObj.appendChild(btnContainer);
             canvas.appendChild(foreignObj);
             
             if (score !== null) {
@@ -2221,6 +2814,10 @@
                 });
                 manualMappings.forEach(m => mappedTargetIndices.add(m.target));
                 
+                // 添加有默认值或逻辑规则的字段
+                Object.keys(defaultValues).forEach(idx => mappedTargetIndices.add(parseInt(idx)));
+                Object.keys(logicRules).forEach(idx => mappedTargetIndices.add(parseInt(idx)));
+                
                 let unmappedRequiredCount = 0;
                 document.querySelectorAll('.target-panel .field-item').forEach(el => {
                     if (el.dataset.isRequired === 'true' && !mappedTargetIndices.has(parseInt(el.dataset.index))) {
@@ -2229,7 +2826,7 @@
                 });
                 
                 if (unmappedRequiredCount > 0) {
-                    if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射，您确认要保存么？`)) {
+                    if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射或设置默认值/逻辑规则，您确认要保存么？`)) {
                         return;
                     }
                 }
@@ -2338,7 +2935,9 @@
                 sourceHeaders: previewData.sourceHeaders,
                 targetHeaders: previewData.targetHeaders,
                 mappings: finalMappings,
-                valueTransformRules: cleanedValueTransformRules
+                valueTransformRules: cleanedValueTransformRules,
+                defaultValues: defaultValues,
+                logicRules: logicRules
             };
             
             const configs = getConfigs();
@@ -2417,6 +3016,10 @@
                 });
                 manualMappings.forEach(m => mappedTargetIndices.add(m.target));
                 
+                // 添加有默认值或逻辑规则的字段
+                Object.keys(defaultValues).forEach(idx => mappedTargetIndices.add(parseInt(idx)));
+                Object.keys(logicRules).forEach(idx => mappedTargetIndices.add(parseInt(idx)));
+                
                 let unmappedRequiredCount = 0;
                 document.querySelectorAll('.target-panel .field-item').forEach(el => {
                     if (el.dataset.isRequired === 'true' && !mappedTargetIndices.has(parseInt(el.dataset.index))) {
@@ -2425,7 +3028,7 @@
                 });
                 
                 if (unmappedRequiredCount > 0) {
-                    if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射，您确认要保存么？`)) {
+                    if (!confirm(`当前还有 ${unmappedRequiredCount} 个必填字段未映射或设置默认值/逻辑规则，您确认要保存么？`)) {
                         return;
                     }
                 }
@@ -2621,7 +3224,15 @@
             
             removedMappings = [];
             valueTransformRules = config.valueTransformRules || {};
+            defaultValues = config.defaultValues || {};
+            logicRules = config.logicRules || {};
             currentLoadedConfig = config;
+            
+            console.log('[LoadConfig] 加载的配置:', config);
+            console.log('[LoadConfig] defaultValues:', defaultValues);
+            console.log('[LoadConfig] logicRules:', logicRules);
+            console.log('[LoadConfig] defaultValues 键名:', Object.keys(defaultValues));
+            console.log('[LoadConfig] defaultValues 键名类型:', Object.keys(defaultValues).map(k => typeof k));
             
             // 更新 previewData.mappings 为配置的映射（保留原始 matchType）
             previewData.mappings = (config.mappings || []).map(m => ({
@@ -2629,9 +3240,33 @@
                 matchType: m.matchType || 'text' // 保留原始 matchType
             }));
             
+            // 重新渲染目标字段（应用默认值和逻辑规则的样式）
+            console.log('[LoadConfig] 准备渲染目标字段，targetHeaders:', previewData.targetHeaders);
+            renderTargetFields({ headers: previewData.targetHeaders });
+            
+            // 检查字段 4 的类名
+            const field4 = document.querySelector('#targetFields li[data-index="4"]');
+            if (field4) {
+                console.log('[LoadConfig] renderTargetFields 后字段 4 的类名:', field4.className);
+            }
+            
             updateMappingDisplay();
+            console.log('[LoadConfig] updateMappingDisplay 后');
             updateStats();
+            console.log('[LoadConfig] updateStats 后');
             drawMappings();
+            console.log('[LoadConfig] drawMappings 后');
+            
+            // 再次检查字段 4 的类名
+            const field4After = document.querySelector('#targetFields li[data-index="4"]');
+            if (field4After) {
+                console.log('[LoadConfig] 所有操作完成后字段 4 的类名:', field4After.className);
+                console.log('[LoadConfig] 字段 4 的计算样式:', {
+                    backgroundColor: window.getComputedStyle(field4After).backgroundColor,
+                    borderLeftColor: window.getComputedStyle(field4After).borderLeftColor,
+                    animation: window.getComputedStyle(field4After).animation
+                });
+            }
             
             Object.keys(valueTransformRules).forEach(key => {
                 const [sourceIndex, targetIndex] = key.split('_').map(Number);

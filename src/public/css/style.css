@@ -790,10 +790,29 @@
             border-left-color: #ff9800 !important;
         }
         
+        .field-item.required.has-default,
+        .field-item.required.has-logic {
+            background: #e8f5e9 !important;
+            border-left-color: #4caf50 !important;
+        }
+        
+        .field-item.has-default,
+        .field-item.has-logic {
+            background: #e8f5e9 !important;
+            border-left-color: #4caf50 !important;
+        }
+        
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
             70% { box-shadow: 0 0 0 10px rgba(244, 67, 54, 0); }
             100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0); }
+        }
+        
+        .default-value-mark,
+        .logic-rule-mark {
+            font-size: 14px;
+            margin-left: 4px;
+            cursor: help;
         }
         
         .field-name {
@@ -1557,18 +1576,18 @@
         }
         
         .connection-point {
-            width: 14px;
-            height: 14px;
+            width: 21px;
+            height: 21px;
             background: #4361ee;
             border-radius: 50%;
             position: absolute;
-            right: -7px;
+            right: -10.5px;
             top: 50%;
             transform: translateY(-50%);
             cursor: crosshair;
             z-index: 20;
             transition: var(--transition);
-            border: 2px solid white;
+            border: 3px solid white;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
         
@@ -1600,7 +1619,7 @@
         }
         
         .target-panel .connection-point {
-            left: -7px;
+            left: -10.5px;
             right: auto;
         }
         
