@@ -1,3 +1,8 @@
+        // ========== 调试日志（生产环境设为 false） ==========
+        const APP_DEBUG = false;
+        function log(...args) { if (APP_DEBUG) log('[app]', ...args); }
+        function warn(...args) { if (APP_DEBUG) warn('[app]', ...args); }
+
         // Session 管理
         let sessionId = null;
         let sourceFileAnalysis = null;
@@ -16,10 +21,86 @@
         function initSession() {
             sessionId = getSessionIdFromCookie();
             if (sessionId) {
-                console.log('恢复 Session:', sessionId);
+                log('恢复 Session:', sessionId);
             }
         }
         
+        // ========== 配置变动追踪 ==========
+        let configDirty = false;
+        let savedConfigSnapshot = null;
+
+        function snapshotCurrentConfig() {
+            if (!previewData) return null;
+            const finalMappings = [];
+            (previewData.mappings || [])
+                .filter(m => !removedMappings.some(r => r.targetIndex === m.targetIndex))
+                .filter(m => !manualMappings.some(mm => mm.target === m.targetIndex))
+                .forEach(m => {
+                    finalMappings.push({
+                        sourceIndex: m.sourceIndex,
+                        targetIndex: m.targetIndex,
+                        sourceField: m.sourceField || previewData.sourceHeaders[m.sourceIndex],
+                        targetField: m.targetField || previewData.targetHeaders[m.targetIndex],
+                    });
+                });
+            manualMappings.forEach(m => {
+                finalMappings.push({
+                    sourceIndex: m.source,
+                    targetIndex: m.target,
+                    sourceField: m.sourceField || previewData.sourceHeaders[m.source],
+                    targetField: m.targetField || previewData.targetHeaders[m.target],
+                });
+            });
+            const cleanedRules = {};
+            Object.keys(valueTransformRules).forEach(key => {
+                const rules = valueTransformRules[key];
+                if (rules && rules.length > 0) cleanedRules[key] = rules;
+            });
+            return JSON.stringify({
+                mappings: finalMappings.sort((a, b) => a.targetIndex - b.targetIndex || a.sourceIndex - b.sourceIndex),
+                valueTransformRules: cleanedRules,
+                defaultValues: { ...defaultValues },
+                logicRules: { ...logicRules },
+                filterConfig: window.filterConfig ? JSON.parse(JSON.stringify(window.filterConfig)) : null,
+            });
+        }
+
+        function markConfigDirty() {
+            const currentSnapshot = snapshotCurrentConfig();
+            const isSameAsSaved = savedConfigSnapshot !== null && currentSnapshot === savedConfigSnapshot;
+            const shouldBeDirty = !isSameAsSaved;
+            if (configDirty !== shouldBeDirty) {
+                configDirty = shouldBeDirty;
+                updateSaveButtonState();
+                log('[config]', shouldBeDirty ? '标记为未保存' : '自动恢复为已保存（与上次保存一致）');
+            }
+        }
+
+        function markConfigSaved() {
+            savedConfigSnapshot = snapshotCurrentConfig();
+            if (configDirty) {
+                configDirty = false;
+                updateSaveButtonState();
+                log('[config] 标记为已保存，已记录快照');
+            }
+        }
+
+        function updateSaveButtonState() {
+            const mainBtn = document.getElementById('saveConfigBtn');
+            const previewFilterBtn = document.querySelector('#dataPreviewModalNew .filter-save-btn, #previewFilterPanel button[onclick*="saveFilterToConfig"]');
+            
+            [mainBtn, previewFilterBtn].forEach(btn => {
+                if (!btn) return;
+                if (configDirty) {
+                    btn.classList.add('config-dirty');
+                    btn.classList.remove('config-clean');
+                } else {
+                    btn.classList.remove('config-dirty');
+                    btn.classList.add('config-clean');
+                }
+            });
+        }
+
         // ========== 数据预览功能 ==========
         let currentPreviewData = null;
         let currentPreviewTab = 'source';
@@ -27,12 +108,77 @@
         let previewValueTransformRules = {}; // 存储预览数据的值转换规则
         let currentRowIndex = 0; // 当前显示的行号（源数据和目标数据和目标数据共用，从 0 开始）
         let problemRows = []; // 存储有必填字段缺失的行号列表
+        let showOnlyFilteredRows = false; // 是否只显示筛选后的行
+        
+        // ========== 数据筛选功能 ==========
+        window.filterPanel = null; // 筛选面板实例（全局变量）
+        let sourceFields = []; // 源字段列表
+        
+        // ========== Day 7: 常量定义 ==========
+        const DAY7_CONSTANTS = {
+            // 缓存配置
+            FIELD_CACHE_TTL: 5 * 60 * 1000, // 字段列表缓存 TTL：5 分钟
+            
+            // Toast 配置
+            TOAST_DURATION: {
+                success: 2000,
+                error: 5000,
+                warning: 4000
+            },
+            
+            // 加载提示
+            LOADING_MESSAGES: {
+                loadingFields: '正在加载字段列表...',
+                initializingPanel: '正在初始化筛选面板...',
+                loadingPreview: '正在加载预览...'
+            },
+            
+            // 错误类型
+            ERROR_TYPES: {
+                NETWORK: 'Failed to fetch',
+                TIMEOUT: 'timeout',
+                HTTP_400: 'HTTP 400',
+                HTTP_404: 'HTTP 404',
+                HTTP_500: 'HTTP 500',
+                HTTP_503: 'HTTP 503'
+            }
+        };
+        
+        // 字段列表缓存（5 分钟 TTL）
+        const fieldCache = {
+            data: null,
+            timestamp: 0,
+            ttl: DAY7_CONSTANTS.FIELD_CACHE_TTL,
+            
+            get() {
+                if (this.data && Date.now() - this.timestamp < this.ttl) {
+                    return this.data;
+                }
+                return null;
+            },
+            
+            set(data) {
+                this.data = data;
+                this.timestamp = Date.now();
+            },
+            
+            clear() {
+                this.data = null;
+                this.timestamp = 0;
+            }
+        };
         
         // 计算有必填字段缺失的行
         function calculateProblemRows(previewData, mappings) {
             const problems = [];
             const targetHeaders = previewData.target.headers;
-            const targetRows = previewData.target.rows;
+            let targetRows = previewData.target.rows;
+            
+            // 如果勾选了"只显示筛选后的数据"，过滤掉被过滤的行
+            const filterInfo = previewData.filterInfo || {};
+            if (showOnlyFilteredRows && filterInfo.isFiltered) {
+                targetRows = targetRows.filter(row => !row._isFiltered);
+            }
             
             // 找出所有必填字段的索引
             const requiredFieldIndices = [];
@@ -69,37 +215,33 @@
         // 跳转到上一个/下一个问题行
         function gotoProblemRow(direction) {
             if (problemRows.length === 0) return;
-            
+
             let targetIdx = -1;
-            
+
             if (direction === 'prev') {
-                // 找小于当前行号的最大值
                 for (let i = problemRows.length - 1; i >= 0; i--) {
                     if (problemRows[i] < currentRowIndex) {
                         targetIdx = problemRows[i];
                         break;
                     }
                 }
-                // 如果没找到，跳转到最后一个问题行（循环）
-                if (targetIdx === -1) {
-                    targetIdx = problemRows[problemRows.length - 1];
-                }
             } else {
-                // 找大于当前行号的最小值
                 for (let i = 0; i < problemRows.length; i++) {
                     if (problemRows[i] > currentRowIndex) {
                         targetIdx = problemRows[i];
                         break;
                     }
                 }
-                // 如果没找到，跳转到第一个问题行（循环）
-                if (targetIdx === -1) {
-                    targetIdx = problemRows[0];
-                }
             }
-            
+
             if (targetIdx !== -1) {
-                gotoRow(targetIdx + 1);
+                currentRowIndex = targetIdx;
+
+                const previewContent = document.getElementById('previewContent');
+                if (previewContent) {
+                    previewContent.innerHTML = renderComparisonView();
+                }
+                updatePreviewRowDisplay();
             }
         }
         
@@ -117,9 +259,9 @@
             try {
                 // 调用预览接口
                 const transformRules = getValueTransformRules();
-                console.log('[Preview] 准备发送的转换规则:', JSON.stringify(transformRules, null, 2));
-                console.log('[Preview] 手动映射:', manualMappings);
-                console.log('[Preview] 移除的映射:', removedMappings);
+                log('[Preview] 准备发送的转换规则:', JSON.stringify(transformRules, null, 2));
+                log('[Preview] 手动映射:', manualMappings);
+                log('[Preview] 移除的映射:', removedMappings);
                 
                 const response = await fetch('/api/preview', {
                     method: 'POST',
@@ -129,7 +271,8 @@
                         manualMappings: manualMappings,
                         removedMappings: removedMappings,
                         valueTransformRules: transformRules,
-                        previewRows: 10
+                        previewRows: 10,
+                        filterConfig: window.filterConfig || null // 添加筛选配置
                     })
                 });
                 
@@ -137,34 +280,122 @@
                 
                 if (result.success) {
                     currentPreviewData = result.previewData;
+                    // 保存筛选信息
+                    currentPreviewData.filterInfo = result.previewData.filterInfo || {};
                     // 使用后端返回的实际映射关系
                     currentActiveMappings = result.activeMappings || [];
                     // 保存值转换规则
                     previewValueTransformRules = result.valueTransformRules || {};
                     // 重置行号为第 1 行
                     currentRowIndex = 0;
-                    // 计算有必填字段缺失的行
+                    // 计算有必填字段缺失的行（基于筛选后的数据）
                     problemRows = calculateProblemRows(result.previewData, result.activeMappings);
                     
-                    // 显示统计信息
-                    const statsEl = document.getElementById('previewStatistics');
-                    if (statsEl) {
-                        statsEl.innerHTML = `
-                            <div class="preview-stat-item">总行数：<strong>${result.statistics.totalRows}</strong></div>
-                            <div class="preview-stat-item">预览行数：<strong id="previewRowNumber">${currentRowIndex + 1} / ${result.statistics.totalRows}</strong></div>
-                            <div class="preview-stat-item">已映射字段：<strong>${result.statistics.mappedFields}</strong></div>
-                            ${problemRows.length > 0 ? `<div class="preview-stat-item" style="color: #e74c3c;">必填缺失行：<strong>${problemRows.length}</strong></div>` : ''}
-                        `;
+                    // 使用统一的统计信息更新函数
+                    updatePreviewStats(result);
+                    
+                    // 渲染预览内容
+                    const previewContentEl = document.getElementById('previewContent');
+                    if (previewContentEl) {
+                        previewContentEl.innerHTML = renderComparisonView();
                     }
                     
-                    // 直接显示对比视图
-                    const previewContent = document.getElementById('previewContent');
-                    if (previewContent) {
-                        previewContent.innerHTML = renderComparisonView();
+                    // 重置筛选面板状态（收起侧边栏）
+                    previewFilterExpanded = false;
+                    const sidebar = document.getElementById('previewFilterSidebar');
+                    const trigger = document.getElementById('previewFilterTrigger');
+                    const divider = document.getElementById('previewDivider');
+                    if (sidebar) sidebar.style.display = 'none';
+                    if (divider) divider.style.display = 'none';
+                    if (trigger) {
+                        updateFilterTriggerBadge();
                     }
+                    
+                    // 清空预览筛选容器（首次展开时再初始化）
+                    const previewFilterContainer = document.getElementById('previewFilterPanelContainer');
+                    if (previewFilterContainer) {
+                        previewFilterContainer.innerHTML = '';
+                    }
+                    window.previewFilterPanel = null;
                     
                     // 打开弹窗
                     document.getElementById('dataPreviewModalNew').style.display = 'flex';
+                    
+                    // 渲染完成后，从行号输入框同步顶部统计栏的"预览行数"
+                    setTimeout(() => {
+                        const rowInput = document.getElementById('rowIndex');
+                        const previewRowEl = document.getElementById('previewRowNumber');
+                        if (rowInput && previewRowEl) {
+                            const inputVal = rowInput.value;
+                            if (inputVal) {
+                                const totalRows = currentPreviewData?.filterInfo?.totalRows 
+                                    || currentPreviewData?.source?.rows?.length || '?';
+                                previewRowEl.textContent = `${inputVal} / ${totalRows}`;
+                            }
+                        }
+                    }, 0);
+                    
+                    // 诊断日志：测量模态框各层实际尺寸
+                    setTimeout(() => {
+                        const modal = document.getElementById('dataPreviewModalNew');
+                        const content = document.getElementById('previewModalContent');
+                        const header = document.getElementById('previewModalHeader');
+                        const body = document.getElementById('previewModalBody');
+                        const footer = content?.querySelector('.preview-modal-footer');
+                        const buttons = footer?.querySelectorAll('button');
+                        
+                        console.group('📐 模态框尺寸诊断 v2');
+                        log('viewport:', { w: window.innerWidth, h: window.innerHeight });
+                        if (modal) {
+                            const mr = modal.getBoundingClientRect();
+                            log('.modal (外罩):', { w: mr.width.toFixed(0), h: mr.height.toFixed(0), 
+                                computedOverflow: getComputedStyle(modal).overflow,
+                                computedPadding: getComputedStyle(modal).padding });
+                        }
+                        if (content) {
+                            const cr = content.getBoundingClientRect();
+                            log('#previewModalContent:', { w: cr.width.toFixed(0), h: cr.height.toFixed(0),
+                                top: cr.top.toFixed(0), bottom: cr.bottom.toFixed(0),
+                                computedMaxH: getComputedStyle(content).maxHeight,
+                                computedHeight: getComputedStyle(content).height,
+                                computedMinH: getComputedStyle(content).minHeight });
+                        }
+                        if (header) {
+                            const hr = header.getBoundingClientRect();
+                            log('.header:', { h: hr.height.toFixed(0), top: hr.top.toFixed(0) });
+                        }
+                        if (body) {
+                            const br = body.getBoundingClientRect();
+                            log('.body:', { h: br.height.toFixed(0), top: br.top.toFixed(0), bottom: br.bottom.toFixed(0) });
+                        }
+                        if (footer) {
+                            const fr = footer.getBoundingClientRect();
+                            log('.footer:', { 
+                                h: fr.height.toFixed(0), top: fr.top.toFixed(0), bottom: fr.bottom.toFixed(0),
+                                overflow: getComputedStyle(footer).overflow,
+                                inViewport: fr.bottom <= window.innerHeight ? '✅' : '❌ 差' + (fr.bottom - window.innerHeight).toFixed(0) + 'px'
+                            });
+                            const cr = content?.getBoundingClientRect();
+                            if (cr) {
+                                log('  footer vs content bottom:', fr.bottom.toFixed(0) + ' vs ' + cr.bottom.toFixed(0),
+                                    fr.bottom > cr.bottom ? '❌ 溢出 ' + (fr.bottom - cr.bottom).toFixed(0) + 'px' : '✅');
+                            }
+                        }
+                        if (buttons && buttons.length > 0) {
+                            buttons.forEach((btn, i) => {
+                                const br = btn.getBoundingClientRect();
+                                const cs = getComputedStyle(btn);
+                                log(`  button[${i}] "${btn.textContent.trim()}":`, {
+                                    w: br.width.toFixed(0), h: br.height.toFixed(0),
+                                    top: br.top.toFixed(0), bottom: br.bottom.toFixed(0),
+                                    lineHeight: cs.lineHeight, fontSize: cs.fontSize,
+                                    padding: cs.padding, overflow: cs.overflow,
+                                    visible: br.bottom <= window.innerHeight ? '✅' : '❌ 差' + (br.bottom - window.innerHeight).toFixed(0) + 'px'
+                                });
+                            });
+                        }
+                        console.groupEnd();
+                    }, 500);
                 } else {
                     showError('预览失败：' + (result.error || '未知错误'));
                 }
@@ -189,6 +420,478 @@
         function closeDataPreview() {
             document.getElementById('dataPreviewModalNew').style.display = 'none';
             currentPreviewData = null;
+        }
+        
+        // ========== 预览弹窗内嵌筛选面板 ==========
+        
+        let previewFilterExpanded = false; // 筛选面板是否展开
+        
+        // 更新筛选触发按钮的状态（高亮 + 条数角标）
+        function updateFilterTriggerBadge() {
+            const trigger = document.getElementById('previewFilterTrigger');
+            const badge = document.getElementById('previewFilterBadge');
+            if (!trigger || !badge) return;
+            
+            const fc = window.filterConfig;
+            const ruleCount = (fc && fc.rules && Array.isArray(fc.rules)) ? fc.rules.length : 0;
+            
+            if (ruleCount > 0) {
+                trigger.classList.add('active');
+                badge.textContent = ruleCount > 99 ? '99+' : String(ruleCount);
+                badge.style.display = 'inline-block';
+                trigger.title = `已配置 ${ruleCount} 条筛选条件，点击查看/编辑`;
+            } else {
+                trigger.classList.remove('active');
+                badge.style.display = 'none';
+                trigger.title = '展开/收起数据筛选面板';
+            }
+        }
+        
+        // ========== 预览弹窗筛选面板：展开/收起 ==========
+        
+        async function togglePreviewFilterPanel() {
+            const trigger = document.getElementById('previewFilterTrigger');
+            const sidebar = document.getElementById('previewFilterSidebar');
+            const divider = document.getElementById('previewDivider');
+            
+            if (!trigger || !sidebar) return;
+            
+            previewFilterExpanded = !previewFilterExpanded;
+            
+            if (previewFilterExpanded) {
+                // 展开：显示侧边栏 + 分隔线，竖向按钮激活
+                sidebar.style.display = 'flex';
+                sidebar.style.flexDirection = 'column';
+                divider.style.display = 'block';
+                trigger.classList.add('active');
+                
+                // 动态计算侧边栏高度（= 主体区域可用高度）
+                const modalBody = document.getElementById('previewModalBody');
+                if (modalBody) {
+                    const bodyRect = modalBody.getBoundingClientRect();
+                    sidebar.style.height = bodyRect.height + 'px';
+                }
+                
+                // 首次展开时初始化筛选面板
+                const container = document.getElementById('previewFilterPanelContainer');
+                if (container && container.children.length === 0) {
+                    await initPreviewFilterPanel();
+                }
+                
+                // 展开后 DOM 布局变化，延迟重绘连线（等浏览器完成 reflow）
+                setTimeout(() => {
+                    if (currentActiveMappings && currentActiveMappings.length > 0) {
+                        drawComparisonConnections(currentActiveMappings);
+                    }
+                }, 300);
+                
+            } else {
+                // 收起：隐藏侧边栏和分隔线，恢复默认状态
+                sidebar.style.display = 'none';
+                divider.style.display = 'none';
+                trigger.classList.remove('active');
+                
+                // 收起后同样需要重绘连线
+                setTimeout(() => {
+                    if (currentActiveMappings && currentActiveMappings.length > 0) {
+                        drawComparisonConnections(currentActiveMappings);
+                    }
+                }, 300);
+            }
+        }
+        
+        // ========== 分隔线拖拽调整宽度 ==========
+        
+        let isDraggingDivider = false;
+        let dragStartX = 0;
+        let dragStartWidth = 0;
+        let dragHintEl = null;
+        
+        function startDividerDrag(e) {
+            e.preventDefault();
+            const sidebar = document.getElementById('previewFilterSidebar');
+            if (!sidebar || sidebar.style.display === 'none') return;
+            
+            isDraggingDivider = true;
+            dragStartX = e.clientX;
+            dragStartWidth = sidebar.getBoundingClientRect().width;
+            
+            const divider = document.getElementById('previewDivider');
+            if (divider) divider.classList.add('dragging');
+            
+            // 创建全局遮罩（防止文字选中/其他事件干扰）
+            dragHintEl = document.createElement('div');
+            dragHintEl.className = 'divider-drag-hint';
+            document.body.appendChild(dragHintEl);
+            
+            document.addEventListener('mousemove', handleDividerDrag);
+            document.addEventListener('mouseup', endDividerDrag);
+        }
+        
+        function handleDividerDrag(e) {
+            if (!isDraggingDivider) return;
+            
+            const delta = e.clientX - dragStartX;
+            let newWidth = dragStartWidth + delta;
+            
+            // 限制范围: 320px ~ 550px
+            newWidth = Math.max(320, Math.min(550, newWidth));
+            
+            const sidebar = document.getElementById('previewFilterSidebar');
+            if (sidebar) {
+                sidebar.style.width = newWidth + 'px';
+            }
+        }
+        
+        function endDividerDrag(e) {
+            if (!isDraggingDivider) return;
+            isDraggingDivider = false;
+            
+            const divider = document.getElementById('previewDivider');
+            if (divider) divider.classList.remove('dragging');
+            
+            if (dragHintEl && dragHintEl.parentNode) {
+                dragHintEl.parentNode.removeChild(dragHintEl);
+            }
+            dragHintEl = null;
+            
+            document.removeEventListener('mousemove', handleDividerDrag);
+            document.removeEventListener('mouseup', endDividerDrag);
+            
+            // 拖动结束后重绘连线（宽度已变化）
+            setTimeout(() => {
+                if (currentActiveMappings && currentActiveMappings.length > 0) {
+                    drawComparisonConnections(currentActiveMappings);
+                }
+            }, 100);
+        }
+        
+        // ========== 初始化筛选面板（在预览弹窗内） ==========
+        
+        async function initPreviewFilterPanel() {
+            const container = document.getElementById('previewFilterPanelContainer');
+            if (!container) return;
+            
+            container.innerHTML = '<div style="text-align: center; padding: 30px; color: #999;">⏳ 正在加载字段列表...</div>';
+            
+            try {
+                if (!window.filterConfig) {
+                    window.filterConfig = { enabled: false, combinationMode: 'AND', rules: [] };
+                }
+                
+                let fields = sourceFields;
+                if (!fields || fields.length === 0) {
+                    const loaded = await loadSourceFields();
+                    if (!loaded || !sourceFields || sourceFields.length === 0) {
+                        container.innerHTML = '<div style="text-align: center; padding: 20px; color: #e74c3c;">⚠️ 无法加载源字段列表</div>';
+                        return;
+                    }
+                    fields = sourceFields;
+                }
+                
+                window.previewFilterPanel = new FilterPanel({
+                    fields: fields,
+                    filterConfig: window.filterConfig,
+                    containerId: 'previewFilterPanelContainer',
+                    operators: window.FILTER_OPERATORS || [],
+                    hidePreviewPanel: true,
+                    onConfigChange: async (config) => {
+                        window.filterConfig = config;
+                        log('[预览筛选] 配置已更新:', config);
+                        updateFilterTriggerBadge();
+                        markConfigDirty();
+                        await refreshPreviewWithFilter();
+                    }
+                });
+                
+                container.innerHTML = '';
+                container.appendChild(window.previewFilterPanel.render());
+                log('[预览] 筛选面板已初始化');
+                
+            } catch (error) {
+                console.error('[预览] 筛选面板初始化失败:', error);
+                container.innerHTML = `<div style="text-align: center; padding: 20px; color: #e74c3c;">❌ 初始化失败: ${error.message}</div>`;
+            }
+        }
+        
+        // ========== 实时联动：筛选变更后刷新预览 ==========
+        
+        let previewRefreshTimer = null;
+        async function refreshPreviewWithFilter() {
+            if (previewRefreshTimer) clearTimeout(previewRefreshTimer);
+            
+            const statsEl = document.getElementById('previewStatistics');
+            if (statsEl) statsEl.innerHTML = '<span style="color: #409eff;">⏳ 正在应用筛选条件...</span>';
+            
+            previewRefreshTimer = setTimeout(async () => {
+                try {
+                    if (!currentPreviewData) return;
+                    
+                    const transformRules = getValueTransformRules();
+                    const response = await fetch('/api/preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            mappings: previewData.mappings,
+                            manualMappings: manualMappings,
+                            removedMappings: removedMappings,
+                            valueTransformRules: transformRules,
+                            previewRows: 10,
+                            filterConfig: window.filterConfig || null
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        currentPreviewData = result.previewData;
+                        currentPreviewData.filterInfo = result.previewData.filterInfo || {};
+                        currentActiveMappings = result.activeMappings || [];
+                        previewValueTransformRules = result.valueTransformRules || {};
+                        
+                        currentRowIndex = 0;
+                        problemRows = calculateProblemRows(result.previewData, result.activeMappings);
+                        
+                        updatePreviewStats(result);
+                        
+                        const previewContentEl = document.getElementById('previewContent');
+                        if (previewContentEl) previewContentEl.innerHTML = renderComparisonView();
+                        
+                        log('[预览] 已根据筛选条件刷新数据');
+                    }
+                } catch (error) {
+                    console.error('[预览] 刷新失败:', error);
+                    if (statsEl) statsEl.innerHTML = '<span style="color: #e74c3c;">❌ 刷新失败，请重试</span>';
+                }
+            }, 500);
+        }
+        
+        function updatePreviewStats(result) {
+            const statsEl = document.getElementById('previewStatistics');
+            if (!statsEl) return;
+            
+            const filterInfo = result.previewData?.filterInfo || {};
+            const isFiltered = filterInfo.isFiltered;
+            const hasFilteredData = filterInfo.hasFilteredData;
+            const totalRows = filterInfo.totalRows || result.statistics?.totalRows || 0;
+            const filteredRows = filterInfo.filteredRows || result.statistics?.filteredRows || totalRows;
+            const displayRows = isFiltered ? filteredRows : totalRows;
+            
+            if (isFiltered && !showOnlyFilteredRows) showOnlyFilteredRows = true;
+            
+            const currentRow = currentPreviewData?.source?.rows?.[currentRowIndex];
+            const actualRowIndex = currentRow?._originalIndex !== undefined ? currentRow._originalIndex : currentRowIndex;
+            
+            log('[updatePreviewStats] 行号诊断', {
+                currentRowIndex,
+                actualRowIndex,
+                currentRow: currentRow ? { _originalIndex: currentRow._originalIndex, _isFiltered: currentRow._isFiltered } : null,
+                sourceRowsLength: currentPreviewData?.source?.rows?.length,
+                totalRows, filteredRows, displayRows, isFiltered
+            });
+            
+            statsEl.innerHTML = `
+                <div class="preview-stat-item" style="display: inline-block; margin-right: 15px;">
+                    ${isFiltered ? '筛选后行数' : '总行数'}：<strong>${displayRows.toLocaleString()}</strong>
+                    ${isFiltered ? `<span style="color: #999; font-size: 12px; margin-left: 4px;">(原始 ${totalRows.toLocaleString()} 行)</span>` : ''}
+                </div>
+                ${hasFilteredData ? `
+                <div class="preview-stat-item" style="display: inline-flex; align-items: center; margin-right: 15px;">
+                    <label style="display: inline-flex; align-items: center; cursor: pointer; font-size: 13px;">
+                        <input type="checkbox" id="showOnlyFiltered" style="margin-right: 5px;" ${showOnlyFilteredRows ? 'checked' : ''} onchange="toggleFilteredView()">
+                        只显示筛选后的数据
+                    </label>
+                </div>
+                ` : ''}
+                <div class="preview-stat-item" style="display: inline-block; margin-right: 15px;">
+                    预览行数：<strong id="previewRowNumber">${actualRowIndex + 1} / ${totalRows}</strong>
+                </div>
+                <div class="preview-stat-item" style="display: inline-block; margin-right: 15px;">
+                    已映射字段：<strong>${result.statistics?.mappedFields || 0}</strong>
+                </div>
+                ${problemRows.length > 0 ? `<div class="preview-stat-item" style="display: inline-block; color: #e74c3c;">必填缺失行：<strong>${problemRows.length}</strong></div>` : ''}
+            `;
+        }
+        
+        // ========== 筛选条件校验 + 保存到配置 ==========
+        
+        function validateFilterConfig(config) {
+            if (!config || !config.enabled) return { valid: true, errors: [] };
+            
+            const errors = [];
+            const rules = config.rules || [];
+            const fields = sourceFields || [];
+            
+            if (rules.length === 0) {
+                return { valid: true, errors: [] }; // 没有规则不算错误
+            }
+            
+            rules.forEach((rule, idx) => {
+                const ruleNum = idx + 1;
+                
+                // 检查字段是否选择
+                if (rule.fieldIndex === null || rule.fieldIndex === undefined || rule.fieldIndex === '') {
+                    errors.push(`条件${ruleNum}：未选择筛选字段`);
+                    return;
+                }
+                
+                // 检查操作符是否选择
+                if (!rule.operator) {
+                    errors.push(`条件${ruleNum}（${fields[rule.fieldIndex]?.name || '未知字段'}）：未选择操作符`);
+                    return;
+                }
+                
+                // 根据操作符检查值
+                const needsValue = !['IS_NULL', 'IS_NOT_NULL'].includes(rule.operator);
+                
+                if (needsValue) {
+                    const hasValue = rule.value !== undefined && rule.value !== null && String(rule.value).trim() !== '';
+                    
+                    if (!hasValue) {
+                        const fieldName = fields[rule.fieldIndex]?.name || '未知字段';
+                        errors.push(`条件${ruleNum}（${fieldName} ${getOperatorLabel(rule.operator)}）：未填写筛选值`);
+                        return;
+                    }
+                    
+                    // BETWEEN 需要两个值
+                    if (rule.operator === 'BETWEEN') {
+                        const vals = Array.isArray(rule.value) ? rule.value : String(rule.value).split(',').map(v => v.trim());
+                        if (vals.length < 2 || (!vals[0] && vals[0] !== 0) || (!vals[1] && vals[1] !== 0)) {
+                            const fieldName = fields[rule.fieldIndex]?.name || '未知字段';
+                            errors.push(`条件${ruleNum}（${fieldName} 在...之间）：需要填写两个值，用逗号分隔`);
+                            return;
+                        }
+                    }
+                    
+                    // IN / NOT_IN 至少一个值
+                    if ((rule.operator === 'IN' || rule.operator === 'NOT_IN')) {
+                        const valStr = Array.isArray(rule.value) ? rule.value.join(',') : String(rule.value);
+                        const vals = valStr.split(/[,，\uFF0C]/).map(v => v.trim()).filter(v => v);
+                        if (vals.length === 0) {
+                            const fieldName = fields[rule.fieldIndex]?.name || '未知字段';
+                            errors.push(`条件${ruleNum}（${fieldName} 在...之中）：需要至少一个值`);
+                            return;
+                        }
+                    }
+                }
+            });
+            
+            return { valid: errors.length === 0, errors };
+        }
+        
+        function getOperatorLabel(operator) {
+            const labels = {
+                'EQUAL': '=', 'NOT_EQUAL': '≠', 'GREATER_THAN': '>', 'LESS_THAN': '<',
+                'GREATER_THAN_OR_EQUAL': '≥', 'LESS_THAN_OR_EQUAL': '≤',
+                'CONTAINS': '包含', 'NOT_CONTAINS': '不包含',
+                'STARTS_WITH': '开头是', 'ENDS_WITH': '结尾是',
+                'IN': '在...之中', 'NOT_IN': '不在...之中',
+                'BETWEEN': '在...之间',
+                'IS_NULL': '为空', 'IS_NOT_NULL': '不为空'
+            };
+            return labels[operator] || operator;
+        }
+        
+        async function saveFilterToConfig() {
+            const config = window.filterConfig;
+            if (!config) {
+                alert('没有可保存的筛选配置');
+                return;
+            }
+            
+            // 校验筛选条件
+            const validation = validateFilterConfig(config);
+            if (!validation.valid) {
+                alert('筛选条件不完整，请检查：\n\n' + validation.errors.join('\n'));
+                return;
+            }
+            
+            // 如果没有任何规则且未启用，提示用户
+            if (!config.enabled || (config.rules && config.rules.length === 0)) {
+                alert('当前没有配置任何筛选条件。\n\n请先添加筛选条件后再保存。');
+                return;
+            }
+            
+            // 检查是否有已加载的配置
+            if (!currentLoadedConfig) {
+                alert('请先在主界面保存映射配置，然后再保存筛选条件。');
+                return;
+            }
+            
+            // 将筛选条件合并到当前配置中
+            currentLoadedConfig.filterConfig = { ...config };
+            window.filterConfig = currentLoadedConfig.filterConfig;
+            
+            try {
+                // 通过 localStorage 保存（与主界面保存逻辑一致）
+                const allConfigs = getConfigs();
+                const idx = allConfigs.findIndex(c => c.name === currentLoadedConfig.name);
+                if (idx >= 0) {
+                    allConfigs[idx] = { ...currentLoadedConfig };
+                } else {
+                    allConfigs.push({ ...currentLoadedConfig });
+                }
+                saveConfigs(allConfigs);
+                
+                alert('✅ 筛选条件已成功保存到配置！\n\n配置名称：' + (currentLoadedConfig.name || '(未命名)'));
+                updateFilterTriggerBadge();
+                markConfigSaved();
+            } catch (error) {
+                console.error('[筛选] 保存配置失败:', error);
+                alert('❌ 保存失败：' + error.message);
+            }
+        }
+        
+        // 切换是否只显示筛选后的数据
+        function toggleFilteredView() {
+            const checkbox = document.getElementById('showOnlyFiltered');
+            if (checkbox) {
+                showOnlyFilteredRows = checkbox.checked;
+                currentRowIndex = 0;
+                problemRows = calculateProblemRows(currentPreviewData, currentActiveMappings);
+                const previewContent = document.getElementById('previewContent');
+                if (previewContent && currentPreviewData) {
+                    previewContent.innerHTML = renderComparisonView();
+                }
+                updatePreviewStatistics();
+                updatePreviewRowDisplay();
+            }
+        }
+        
+        // 更新统计信息显示
+        function updatePreviewStatistics() {
+            const statsEl = document.getElementById('previewStatistics');
+            if (statsEl && currentPreviewData) {
+                const filterInfo = currentPreviewData.filterInfo || {};
+                const totalRows = filterInfo.totalRows || currentPreviewData.source.rows.length;
+                const filteredRows = filterInfo.filteredRows || totalRows;
+                const isFiltered = filterInfo.isFiltered;
+
+                const displayRows = showOnlyFilteredRows && isFiltered ? filteredRows : totalRows;
+
+                const rowIndexInput = document.getElementById('rowIndex');
+                if (rowIndexInput) {
+                    rowIndexInput.max = displayRows;
+                }
+
+                statsEl.innerHTML = `
+                    <div class="preview-stat-item">
+                        ${showOnlyFilteredRows && isFiltered ? '筛选后行数' : '总行数'}：<strong>${displayRows}</strong>
+                        ${showOnlyFilteredRows && isFiltered ? `<span style="color: #666; font-size: 12px; margin-left: 5px;">(原始：${totalRows}行)</span>` : ''}
+                    </div>
+                    ${filterInfo.hasFilteredData ? `
+                    <div class="preview-stat-item" style="margin-left: 10px;">
+                        <label style="display: inline-flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="showOnlyFiltered" style="margin-right: 5px;" ${showOnlyFilteredRows ? 'checked' : ''} onchange="toggleFilteredView()">
+                            只显示筛选后的数据
+                        </label>
+                    </div>
+                    ` : ''}
+                    <div class="preview-stat-item">预览行数：<strong id="previewRowNumber"></strong></div>
+                    <div class="preview-stat-item">已映射字段：<strong>${currentActiveMappings.length}</strong></div>
+                    ${problemRows.length > 0 ? `<div class="preview-stat-item" style="color: #e74c3c;">必填缺失行：<strong>${problemRows.length}</strong></div>` : ''}
+                `;
+            }
         }
         
         // 切换预览标签页
@@ -269,8 +972,15 @@
             
             const sourceHeaders = currentPreviewData.source.headers;
             const targetHeaders = currentPreviewData.target.headers;
-            const sourceRows = currentPreviewData.source.rows;
-            const targetRows = currentPreviewData.target.rows;
+            let sourceRows = currentPreviewData.source.rows;
+            let targetRows = currentPreviewData.target.rows;
+            
+            // 如果勾选了"只显示筛选后的数据"，过滤掉被过滤的行
+            const filterInfo = currentPreviewData.filterInfo || {};
+            if (showOnlyFilteredRows && filterInfo.isFiltered) {
+                sourceRows = sourceRows.filter(row => !row._isFiltered);
+                targetRows = targetRows.filter(row => !row._isFiltered);
+            }
             
             // 使用后端返回的实际映射关系
             const activeMappings = currentActiveMappings;
@@ -282,82 +992,103 @@
             const currentRow = sourceRows[currentRowIndex] || {};
             const currentTargetRow = targetRows[currentRowIndex] || {};
             
-            let html = `<div class="comparison-container" id="comparisonContainer">
-                <!-- 源数据表格 -->
+            // 获取实际行号（源数据中的行号）
+            const actualRowIndex = currentRow._originalIndex !== undefined ? currentRow._originalIndex : currentRowIndex;
+            
+            // 计算显示的总行数（用于行号输入框的 max）
+            const displayTotalRows = sourceRows.length;
+            const originalTotalRows = filterInfo.totalRows || currentPreviewData.source.rows.length;
+            
+            let html = `<div class="comparison-container" id="comparisonContainer" style="position: relative;">
+                <div id="comparisonScrollArea" style="overflow-x: auto; position: relative;">
+                <div style="display: flex; flex-direction: column; gap: 15px; min-width: max-content;" id="comparisonContentInner">
+                
+                <!-- 源数据表格（上） -->
                 <div class="comparison-panel" style="display: flex; align-items: flex-start; gap: 10px;">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
-                        <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📥 源数据</div>
-                        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
-                            <button onclick="changeRow(-1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="上一行">▲</button>
-                            <button onclick="gotoProblemRow('prev')" style="width: 20px; height: 20px; border: 1px solid #e74c3c; background: #ffebee; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; color: #e74c3c;" title="上一个必填缺失行">▲</button>
-                            <input type="number" id="rowIndex" value="${currentRowIndex + 1}" min="1" max="${Math.max(sourceRows.length, targetRows.length)}" onchange="gotoRow(this.value)" style="width: 45px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px 2px; font-size: 13px; -moz-appearance: textfield; -webkit-appearance: none; appearance: none;" />
-                            <button onclick="gotoProblemRow('next')" style="width: 20px; height: 20px; border: 1px solid #e74c3c; background: #ffebee; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; color: #e74c3c;" title="下一个必填缺失行">▼</button>
-                            <button onclick="changeRow(1)" style="width: 20px; height: 20px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="下一行">▼</button>
+                        <div class="row-nav-label">📥 源数据</div>
+                        <div class="row-nav-btns">
+                            ${(() => {
+                                const canGoUp = currentRowIndex > 0;
+                                const canGoDown = currentRowIndex < sourceRows.length - 1;
+                                const canGoProblemUp = problemRows.some(idx => idx < currentRowIndex);
+                                const canGoProblemDown = problemRows.some(idx => idx > currentRowIndex);
+                                return `
+                            <div class="row-nav-row">
+                                <button class="row-nav-btn${canGoUp ? '' : ' disabled'}" onclick="changeRow(-1)" title="上一行" ${canGoUp ? '' : 'disabled'}>▲</button>
+                                <button class="row-nav-btn row-nav-btn--problem${canGoProblemUp ? '' : ' disabled'}" onclick="gotoProblemRow('prev')" title="上一个必填缺失行" ${canGoProblemUp ? '' : 'disabled'}>▲</button>
+                            </div>
+                            <input type="number" id="rowIndex" value="${actualRowIndex + 1}" min="1" max="${displayTotalRows}" onchange="gotoRow(this.value)" class="row-nav-input" />
+                            <div class="row-nav-row">
+                                <button class="row-nav-btn${canGoDown ? '' : ' disabled'}" onclick="changeRow(1)" title="下一行" ${canGoDown ? '' : 'disabled'}>▼</button>
+                                <button class="row-nav-btn row-nav-btn--problem${canGoProblemDown ? '' : ' disabled'}" onclick="gotoProblemRow('next')" title="下一个必填缺失行" ${canGoProblemDown ? '' : 'disabled'}>▼</button>
+                            </div>
+                                `;
+                            })()}
                         </div>
-                        <div style="font-size: 11px; color: #999;">/${sourceRows.length}</div>
-                        <div style="font-size: 10px; color: #999; text-align: center; max-width: 60px; margin-top: 5px; line-height: 1.3;">红色箭头跳转必填缺失行</div>
+                        <div class="row-nav-total">/${originalTotalRows}</div>
+                        <div class="row-nav-hint">红色箭头跳转必填缺失行</div>
                     </div>
-                    <div style="flex: 1; overflow: auto;">
-                        <table class="preview-table" id="sourcePreviewTable">
-                            <thead>
-                                <tr>
-                                    ${sourceHeaders.map((h, i) => 
-                                        `<th data-index="${i}" id="source-th-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(h)}</th>`
-                                    ).join('')}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    ${sourceHeaders.map((h, i) =>
-                                        `<td data-index="${i}" id="source-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(currentRow[h] !== undefined ? currentRow[h] : '')}</td>`
-                                    ).join('')}
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="preview-table" id="sourcePreviewTable">
+                        <thead>
+                            <tr>
+                                ${sourceHeaders.map((h, i) => 
+                                    `<th data-index="${i}" id="source-th-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;">${escapeHtml(h)}</th>`
+                                ).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="${currentRow._isFiltered ? 'text-decoration: line-through; color: #999; background-color: #f5f5f5;' : ''}">
+                                ${sourceHeaders.map((h, i) =>
+                                    `<td data-index="${i}" id="source-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; ${currentRow._isFiltered ? 'text-decoration: line-through; color: #999;' : ''}">${escapeHtml(currentRow[h] !== undefined ? currentRow[h] : '')}</td>`
+                                ).join('')}
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
                 
-                <!-- 连线箭头 -->
-                <div class="comparison-arrow">↓</div>
+                <!-- 连线箭头（上下分隔） -->
+                <div class="comparison-arrow" style="text-align: center; padding: 5px 0;">↓</div>
                 
-                <!-- 目标数据表格 -->
+                <!-- 目标数据表格（下） -->
                 <div class="comparison-panel" style="display: flex; align-items: flex-start; gap: 10px;">
                     <div style="writing-mode: vertical-lr; font-weight: 600; color: #666; font-size: 14px; padding: 10px 5px;">📤 目标数据</div>
-                    <div style="flex: 1; overflow: auto;">
-                        <table class="preview-table" id="targetPreviewTable">
-                            <thead>
-                                <tr>
-                                    ${targetHeaders.map((h, i) => {
-                                        const isRequired = h.endsWith('*');
-                                        const mapping = currentActiveMappings.find(m => m.targetIndex === i);
-                                        const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
-                                        const isEmptyValue = displayValue === '' || displayValue === null || displayValue === undefined;
-                                        const isRequiredAndEmpty = isRequired && isEmptyValue;
-                                        const thStyle = isRequiredAndEmpty 
-                                            ? 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; background-color: #ffcccc; border: 2px solid #e74c3c;'
-                                            : 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;';
-                                        return `<th data-index="${i}" id="target-th-${i}" style="${thStyle}" title="${isRequiredAndEmpty ? '必填字段值为空' : ''}">${escapeHtml(h)}</th>`;
-                                    }).join('')}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    ${targetHeaders.map((h, i) => {
-                                        const mapping = currentActiveMappings.find(m => m.targetIndex === i);
-                                        const rules = mapping ? previewValueTransformRules[`${mapping.sourceIndex}_${i}`] : null;
-                                        const validRules = rules ? rules.filter(isValidTransformRule) : [];
-                                        const hasTransformRules = validRules.length > 0;
-                                        const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
-                                        return `<td data-index="${i}" id="target-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; ${hasTransformRules ? 'background-color: #fff3cd;' : ''}">${escapeHtml(displayValue)}</td>`;
-                                    }).join('')}
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="preview-table" id="targetPreviewTable">
+                        <thead>
+                            <tr>
+                                ${targetHeaders.map((h, i) => {
+                                    const isRequired = h.endsWith('*');
+                                    const mapping = currentActiveMappings.find(m => m.targetIndex === i);
+                                    const displayValue = currentTargetRow[h] !== undefined ? currentTargetRow[h] : '';
+                                    const isEmptyValue = displayValue === '' || displayValue === null || displayValue === undefined;
+                                    const isRequiredAndEmpty = isRequired && isEmptyValue;
+                                    const thStyle = isRequiredAndEmpty 
+                                        ? 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; background-color: #ffcccc; border: 2px solid #e74c3c;'
+                                        : 'writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px;';
+                                    return `<th data-index="${i}" id="target-th-${i}" style="${thStyle}" title="${isRequiredAndEmpty ? '必填字段值为空' : ''}">${escapeHtml(h)}</th>`;
+                                }).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="${currentRow._isFiltered ? 'background-color: #f5f5f5;' : ''}">
+                                ${targetHeaders.map((h, i) => {
+                                    const mapping = currentActiveMappings.find(m => m.targetIndex === i);
+                                    const rules = mapping ? previewValueTransformRules[`${mapping.sourceIndex}_${i}`] : null;
+                                    const validRules = rules ? rules.filter(isValidTransformRule) : [];
+                                    const hasTransformRules = validRules.length > 0;
+                                    const displayValue = currentRow._isFiltered ? '' : (currentTargetRow[h] !== undefined ? currentTargetRow[h] : '');
+                                    return `<td data-index="${i}" id="target-td-${i}" style="writing-mode: vertical-lr; min-width: 30px; max-width: 40px; padding: 8px 4px; ${currentRow._isFiltered ? 'color: #ccc;' : ''} ${hasTransformRules && !currentRow._isFiltered ? 'background-color: #fff3cd;' : ''}">${escapeHtml(displayValue)}</td>`;
+                                }).join('')}
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                
-                <!-- SVG 连线层 -->
-                <svg class="connection-layer" id="comparisonConnectionLayer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;">
+                </div>
+                </div>
+
+                <!-- SVG 连线层（绝对定位，覆盖整个 comparisonContainer） -->
+                <svg class="connection-layer" id="comparisonConnectionLayer"
+                     style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: block; overflow: visible;">
                 </svg>
             </div>`;
             
@@ -427,176 +1158,235 @@
         function changeRow(delta) {
             const sourceRows = currentPreviewData?.source?.rows || [];
             if (sourceRows.length === 0) return;
-            
+
             const newIndex = currentRowIndex + delta;
             if (newIndex >= 0 && newIndex < sourceRows.length) {
                 currentRowIndex = newIndex;
-                // 更新输入框显示
-                const inputEl = document.getElementById('rowIndex');
-                if (inputEl) {
-                    inputEl.value = newIndex + 1;
-                }
-                // 更新预览行数显示
-                updatePreviewRowDisplay();
-                // 重新渲染对比视图
                 const previewContent = document.getElementById('previewContent');
                 if (previewContent) {
                     previewContent.innerHTML = renderComparisonView();
                 }
+                updatePreviewRowDisplay();
             }
         }
         
+        // 智能定位：找到距离输入行号最近的满足筛选条件的行
+        // 返回值：始终是 sourceRows（当前显示数组）的索引
+        function findNearestValidRow(inputRowNum) {
+            const allRows = currentPreviewData?.source?.rows || [];
+            if (allRows.length === 0) return -1;
+
+            const num = parseInt(inputRowNum);
+            if (isNaN(num) || num < 1) return 0;
+
+            const targetOriginalIndex = Math.min(num - 1, allRows.length - 1);
+
+            const filterInfo = currentPreviewData?.filterInfo || {};
+            const isFilterActive = showOnlyFilteredRows && filterInfo.isFiltered;
+
+            if (!isFilterActive) {
+                return targetOriginalIndex;
+            }
+
+            const validRows = [];
+            for (let i = 0; i < allRows.length; i++) {
+                if (!allRows[i]._isFiltered) {
+                    validRows.push({ originalIndex: i, filteredIndex: validRows.length });
+                }
+            }
+
+            if (validRows.length === 0) return -1;
+
+            let found = null;
+            for (const row of validRows) {
+                if (row.originalIndex >= targetOriginalIndex) {
+                    found = row;
+                    break;
+                }
+            }
+
+            if (!found) {
+                found = validRows[validRows.length - 1];
+            }
+
+            log(`[findNearestValidRow] 输入:${num}, 目标原始索引:${targetOriginalIndex}, 找到→原始行${found.originalIndex + 1}(过滤后第${found.filteredIndex + 1}个)`);
+
+            return found.filteredIndex;
+        }
+
         // 跳转到指定行号
         function gotoRow(rowNum) {
             const sourceRows = currentPreviewData?.source?.rows || [];
             if (sourceRows.length === 0) return;
-            
-            const num = parseInt(rowNum);
-            if (!isNaN(num) && num >= 1 && num <= sourceRows.length) {
-                currentRowIndex = num - 1; // 转为 0 基索引
-                // 更新预览行数显示
-                updatePreviewRowDisplay();
-                // 重新渲染对比视图
-                const previewContent = document.getElementById('previewContent');
-                if (previewContent) {
-                    previewContent.innerHTML = renderComparisonView();
-                }
+
+            const actualIndex = findNearestValidRow(rowNum);
+            if (actualIndex === -1) {
+                warn('[gotoRow] 无满足筛选条件的数据');
+                return;
             }
+
+            currentRowIndex = actualIndex;
+
+            const previewContent = document.getElementById('previewContent');
+            if (previewContent) {
+                previewContent.innerHTML = renderComparisonView();
+            }
+            updatePreviewRowDisplay();
         }
         
-        // 更新预览行数显示
+        // 统一更新"预览行数"显示（行号选择器 + 顶部统计栏，始终一致）
         function updatePreviewRowDisplay() {
-            const sourceRows = currentPreviewData?.source?.rows || [];
+            const rowInput = document.getElementById('rowIndex');
             const previewRowEl = document.getElementById('previewRowNumber');
-            if (previewRowEl && sourceRows.length > 0) {
-                previewRowEl.textContent = `${currentRowIndex + 1} / ${sourceRows.length}`;
-            }
+            if (!rowInput || !previewRowEl) return;
+            
+            const displayNum = rowInput.value || '1';
+            const totalRows = currentPreviewData?.filterInfo?.totalRows 
+                || currentPreviewData?.source?.rows?.length || '?';
+            
+            // 更新顶部统计栏的"预览行数"
+            previewRowEl.textContent = `${displayNum} / ${totalRows}`;
         }
         
         // 绘制对比视图的连线
+        // SVG 现在是 #comparisonContainer 的直接子元素（position:absolute; width:100%; height:100%）
+        // 坐标系以 #comparisonContainer 的左上角为原点
         function drawComparisonConnections(mappings) {
             const svg = document.getElementById('comparisonConnectionLayer');
             const container = document.getElementById('comparisonContainer');
             
-            if (!svg || !container) return;
+            if (!svg || !container) {
+                warn('[drawConnections] SVG或容器未找到', { svg: !!svg, container: !!container });
+                return;
+            }
             
             const containerRect = container.getBoundingClientRect();
             
+            log('[drawConnections] 开始绘制', {
+                mappingsCount: mappings.length,
+                containerRect: { w: containerRect.width, h: containerRect.height, left: containerRect.left, top: containerRect.top },
+                svgSize: { w: svg.clientWidth, h: svg.clientHeight }
+            });
+            
             // 清空旧连线
             svg.innerHTML = '';
-            
+
+            const sourceTableBody = document.querySelector('#sourcePreviewTable tbody');
+            const isCurrentRowFiltered = sourceTableBody && sourceTableBody.querySelector('tr')?.style.textDecoration?.includes('line-through');
+            if (isCurrentRowFiltered) {
+                log('[drawConnections] 当前行被过滤，跳过绘制');
+                return;
+            }
             // 过滤掉已移除的映射
             const activeMappings = mappings.filter(m => 
                 !removedMappings.some(rm => rm.targetIndex === m.targetIndex)
             );
             
+            log('[drawConnections] 有效映射数:', activeMappings.length);
+            
+            let drawnCount = 0;
+            
             activeMappings.forEach(mapping => {
                 const sourceTd = document.getElementById(`source-td-${mapping.sourceIndex}`);
                 const targetTh = document.getElementById(`target-th-${mapping.targetIndex}`);
                 
-                if (!sourceTd || !targetTh) return;
+                if (!sourceTd || !targetTh) {
+                    warn('[drawConnections] 找不到元素', {
+                        sourceId: `source-td-${mapping.sourceIndex}`,
+                        targetId: `target-th-${mapping.targetIndex}`,
+                        hasSource: !!sourceTd,
+                        hasTarget: !!targetTh
+                    });
+                    return;
+                }
                 
+                // 使用 getBoundingClientRect 计算相对于 container 的坐标
                 const sourceRect = sourceTd.getBoundingClientRect();
                 const targetRect = targetTh.getBoundingClientRect();
                 
-                // 计算坐标（相对于 SVG 容器）
-                // 连线起点：源数据单元格的下边缘
-                const x1 = sourceRect.left + sourceRect.width/2 - containerRect.left;
-                const y1 = sourceRect.bottom - containerRect.top;
-                // 连线终点：目标数据表头的上边缘
-                const x2 = targetRect.left + targetRect.width/2 - containerRect.left;
+                // 坐标 = 元素视口坐标 - 容器视口坐标
+                const x1 = sourceRect.left - containerRect.left + sourceRect.width / 2;
+                const y1 = sourceRect.top - containerRect.top + sourceRect.height;
+                
+                const x2 = targetRect.left - containerRect.left + targetRect.width / 2;
                 const y2 = targetRect.top - containerRect.top;
                 
-                // 根据映射类型确定颜色
-                let color = '#F44336'; // 默认红色（低置信度）
+                log(`[drawConnections] 映射 ${mapping.sourceIndex}→${mapping.targetIndex}:`, {
+                    x1: x1.toFixed(1), y1: y1.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1),
+                    sourceSize: `${sourceRect.width.toFixed(0)}x${sourceRect.height.toFixed(0)}`,
+                    targetSize: `${targetRect.width.toFixed(0)}x${targetRect.height.toFixed(0)}`
+                });
+                
+                // 根据匹配类型确定颜色和样式
+                let color = '#F44336';
                 let strokeWidth = 2;
-                let strokeDasharray = '2,2'; // 虚线
+                let strokeDasharray = '2,2';
                 
                 if (mapping.matchType === 'manual') {
-                    // 🔵 蓝色 = 手动映射
-                    color = '#2196f3';
-                    strokeWidth = 3;
-                    strokeDasharray = ''; // 实线
+                    color = '#2196f3'; strokeWidth = 3; strokeDasharray = '';
                 } else if (mapping.score === 100) {
-                    // 🟢 绿色（高置信度）= score = 100
-                    color = '#4CAF50';
-                    strokeWidth = 3;
-                    strokeDasharray = '';
+                    color = '#4CAF50'; strokeWidth = 3; strokeDasharray = '';
                 } else if (mapping.score >= 80) {
-                    // 🟠 橙色（中置信度）= score >= 80
-                    color = '#FF9800';
-                    strokeWidth = 2;
-                    strokeDasharray = '5,5';
+                    color = '#FF9800'; strokeWidth = 2; strokeDasharray = '5,5';
                 } else {
-                    // 🔴 红色（低置信度）= score < 80
-                    color = '#F44336';
-                    strokeWidth = 2;
-                    strokeDasharray = '2,2';
+                    color = '#F44336'; strokeWidth = 2; strokeDasharray = '2,2';
                 }
                 
-                // 创建贝塞尔曲线路径
+                // 绘制贝塞尔曲线路径
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                
-                // 计算控制点
                 const controlY1 = y1 + (y2 - y1) * 0.3;
                 const controlY2 = y1 + (y2 - y1) * 0.7;
-                
-                const d = `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y2}`;
-                
-                path.setAttribute('d', d);
+                path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${controlY1}, ${x2} ${controlY2}, ${x2} ${y2}`);
                 path.setAttribute('stroke', color);
                 path.setAttribute('stroke-width', strokeWidth.toString());
                 path.setAttribute('stroke-dasharray', strokeDasharray);
                 path.setAttribute('fill', 'none');
                 path.setAttribute('opacity', '0.7');
-                
                 svg.appendChild(path);
                 
-                // 添加起点圆点
+                // 起点圆点（源数据单元格底部）
                 const startCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                startCircle.setAttribute('cx', x1);
-                startCircle.setAttribute('cy', y1);
+                startCircle.setAttribute('cx', String(x1));
+                startCircle.setAttribute('cy', String(y1));
                 startCircle.setAttribute('r', '4');
                 startCircle.setAttribute('fill', color);
                 startCircle.setAttribute('opacity', '0.8');
-                
                 svg.appendChild(startCircle);
                 
-                // 检查是否有转换规则
+                // 获取值转换规则
                 const rules = previewValueTransformRules[`${mapping.sourceIndex}_${mapping.targetIndex}`];
                 const validRules = rules ? rules.filter(isValidTransformRule) : [];
-                const hasTransformRules = validRules.length > 0;
                 
-                // 添加终点圆点
+                // 终点圆点（目标表头顶部）
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('cx', x2);
-                circle.setAttribute('cy', y2);
+                circle.setAttribute('cx', String(x2));
+                circle.setAttribute('cy', String(y2));
                 circle.setAttribute('r', '4');
                 circle.setAttribute('fill', color);
                 circle.setAttribute('opacity', '0.8');
-                
                 svg.appendChild(circle);
                 
-                // 如果有转换规则，在连线中间添加 ⚙ 标记
-                if (hasTransformRules) {
+                // 如果有转换规则，显示齿轮图标
+                if (validRules.length > 0) {
                     const midX = (x1 + x2) / 2;
                     const midY = (y1 + y2) / 2;
-                    
                     const foreignObj = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
                     foreignObj.setAttribute('x', String(midX - 10));
                     foreignObj.setAttribute('y', String(midY - 10));
                     foreignObj.setAttribute('width', '20');
                     foreignObj.setAttribute('height', '20');
                     foreignObj.style.pointerEvents = 'none';
-                    
                     const iconDiv = document.createElement('div');
                     iconDiv.style.cssText = 'width:20px;height:20px;background:#fff3cd;border:2px solid #ff9800;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;';
                     iconDiv.textContent = '⚙';
-                    
                     foreignObj.appendChild(iconDiv);
                     svg.appendChild(foreignObj);
                 }
+                
+                drawnCount++;
             });
+            
+            log(`[drawConnections] 完成，共绘制 ${drawnCount} 条连线`);
         }
         
         // ========== 控制面板拖拽功能 ==========
@@ -676,7 +1466,7 @@
             const newSessionId = response.headers.get('X-Session-Id');
             if (newSessionId && newSessionId !== sessionId) {
                 sessionId = newSessionId;
-                console.log('更新 Session:', sessionId);
+                log('更新 Session:', sessionId);
             }
         }
         
@@ -829,6 +1619,17 @@
                 if (type === 'source') {
                     sourceFile = null;
                     sourceSampleData = null;
+                    sourceFileAnalysis = null;
+                    
+                    // 重置筛选面板状态（面板UI在预览弹窗中，此处只重置数据）
+                    const filterPanelContainer = document.getElementById('filterPanelContainer');
+                    if (filterPanelContainer) {
+                        filterPanelContainer.innerHTML = '';
+                    }
+                    // 重置筛选面板实例和配置
+                    window.filterPanel = null;
+                    window.filterConfig = { enabled: false, combinationMode: 'AND', rules: [] };
+                    sourceFields = [];
                 } else {
                     targetFile = null;
                 }
@@ -842,6 +1643,7 @@
                     defaultValues = {};
                     logicRules = {};
                     currentLoadedConfig = null;
+                    markConfigSaved();
                     
                     const statsPanel = document.getElementById('statsPanel');
                     const sourceStatsPanel = document.getElementById('sourceStatsPanel');
@@ -869,6 +1671,13 @@
                 
                 if (fileInfo && fileInfo.classList.contains('file-info')) {
                     fileInfo.remove();
+                }
+                
+                // 重置文件输入框的值，允许重新选择同一个文件
+                const fileInputId = type === 'source' ? 'sourceFileInput' : 'targetFileInput';
+                const fileInput = document.getElementById(fileInputId);
+                if (fileInput) {
+                    fileInput.value = '';
                 }
                 
                 if (tableContainer) {
@@ -1055,7 +1864,7 @@
                 if (result.success) {
                     uploadAbortController = null;
                     
-                    console.log('上传成功，result:', result);
+                    log('上传成功，result:', result);
                     
                     // 上传成功后，调用 analyze 接口分析文件
                     try {
@@ -1081,11 +1890,15 @@
                         if (type === 'source') {
                             sourceFile = file;
                             sourceFileAnalysis = analysis;
+                            // 清除字段列表缓存（新文件需要重新加载字段）
+                            fieldCache.clear();
                             renderSourceFields({
                                 headers: analysis.dataHeaders,
                                 rowCount: analysis.dataRowCount,
                                 sampleData: analysis.sampleData
                             });
+                            // 筛选面板已迁移至预览弹窗内，不再在主界面初始化
+                            // initFilterPanel() 将在 showDataPreview() 中按需调用
                             const sourceRowsElement = document.getElementById('sourceFileRows');
                             if (sourceRowsElement) {
                                 sourceRowsElement.textContent = `${analysis.dataRowCount} 行数据`;
@@ -1240,9 +2053,9 @@
             html += '</tbody></table></div>';
             content.innerHTML = html;
             
-            console.log('Preview HTML generated, table rows:', sourceSampleData.length);
-            console.log('Preview headers:', headers);
-            console.log('Preview first row:', sourceSampleData[0]);
+            log('Preview HTML generated, table rows:', sourceSampleData.length);
+            log('Preview headers:', headers);
+            log('Preview first row:', sourceSampleData[0]);
             
             document.getElementById('dataPreviewModal').classList.add('show');
         }
@@ -1433,6 +2246,7 @@
                 if (field === 'type' || field === 'operation' || field === 'params') {
                     renderTransformRules(valueTransformRules[key]);
                 }
+                markConfigDirty();
             }
         }
         
@@ -1441,6 +2255,7 @@
             if (valueTransformRules[key]) {
                 valueTransformRules[key].splice(idx, 1);
                 renderTransformRules(valueTransformRules[key]);
+                markConfigDirty();
             }
         }
         
@@ -1496,6 +2311,7 @@
             updateFieldTransformIndicator(currentTransformField.sourceIndex, currentTransformField.targetIndex);
             
             closeValueTransformModal();
+            markConfigDirty();
         }
         
         function isValidTransformRule(rule) {
@@ -1547,10 +2363,6 @@
             const container = document.getElementById('targetTableContainer');
             const list = document.getElementById('targetFields');
             
-            console.log('[RenderTargetFields] 开始渲染，字段数量:', data.headers.length);
-            console.log('[RenderTargetFields] 当前 defaultValues:', defaultValues);
-            console.log('[RenderTargetFields] 当前 logicRules:', logicRules);
-            
             list.innerHTML = '';
             fieldElements.target = {};
             
@@ -1569,15 +2381,6 @@
                 
                 const hasDefault = defaultValues[idx] !== undefined || defaultValues[String(idx)] !== undefined;
                 const hasLogic = logicRules[idx] !== undefined || logicRules[String(idx)] !== undefined;
-                
-                console.log(`[RenderTargetFields] 字段 ${idx} (${displayHeader}):`, {
-                    isRequired,
-                    hasDefault,
-                    hasLogic,
-                    defaultValue: defaultValues[idx] || defaultValues[String(idx)],
-                    defaultValues_num: defaultValues[idx],
-                    defaultValues_str: defaultValues[String(idx)]
-                });
                 
                 let statusMark = '';
                 if (hasDefault) {
@@ -1598,30 +2401,21 @@
                     li.classList.add('required');
                     const hasMapping = manualMappings.some(m => m.target === idx) || 
                         (previewData && previewData.mappings && previewData.mappings.some(m => m.targetIndex === idx && !removedMappings.some(r => r.targetIndex === idx)));
-                    console.log(`[RenderTargetFields] 字段 ${idx} 必填检查:`, { hasMapping, hasDefault, hasLogic });
-                    console.log(`[RenderTargetFields] 字段 ${idx} 当前类名:`, li.className);
                     if (hasMapping || hasDefault || hasLogic) {
                         li.classList.add('mapped');
-                        console.log(`[RenderTargetFields] 字段 ${idx} 添加 mapped 类，当前类名:`, li.className);
                     } else {
                         li.classList.add('missing');
-                        console.log(`[RenderTargetFields] 字段 ${idx} 添加 missing 类，当前类名:`, li.className);
                     }
                 } else {
                     // 非必填字段不需要 mapped/missing 类
                     li.classList.remove('mapped', 'missing');
-                    console.log(`[RenderTargetFields] 字段 ${idx} 非必填，移除 mapped/missing 类，当前类名:`, li.className);
                 }
                 
                 if (hasDefault) {
                     li.classList.add('has-default');
-                    console.log(`[RenderTargetFields] 字段 ${idx} 添加 has-default 类，当前类名:`, li.className);
                 } else if (hasLogic) {
                     li.classList.add('has-logic');
-                    console.log(`[RenderTargetFields] 字段 ${idx} 添加 has-logic 类，当前类名:`, li.className);
                 }
-                
-                console.log(`[RenderTargetFields] 字段 ${idx} 最终类名:`, li.className);
                 
                 li.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
@@ -1750,6 +2544,7 @@
             // 更新映射显示
             updateMappingDisplay();
             setTimeout(drawMappings, 100);
+            markConfigDirty();
         }
         
         function updateMappingDisplay() {
@@ -1880,6 +2675,7 @@
             updateMappingDisplay();
             drawMappings();
             updateSteps();
+            markConfigDirty();
         }
         
         // ========== 右键菜单和弹窗函数 ==========
@@ -2000,30 +2796,30 @@
             const currentValue = defaultValues[targetIndex] || '';
             
             const modalHtml = `
-                <div class="modal-overlay" id="defaultValueModalOverlay" onclick="closeDefaultValueModal(event)" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10001;">
-                    <div class="modal-content" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; padding: 24px; min-width: 400px; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3 style="margin: 0; font-size: 18px; color: #333;">📝 设置默认值</h3>
-                            <button onclick="closeDefaultValueModal()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #999;">×</button>
+                <div class="dlg-overlay" id="defaultValueModalOverlay" onclick="closeDefaultValueModal(event)">
+                    <div class="dlg-box dlg-box--sm" onclick="event.stopPropagation()">
+                        <div class="dlg-header">
+                            <h3 class="dlg-title">📝 设置默认值</h3>
+                            <button class="dlg-close" onclick="closeDefaultValueModal()">×</button>
                         </div>
                         
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">目标字段</label>
-                            <div style="padding: 10px 12px; background: #f5f5f5; border-radius: 6px; color: #333;">${escapeHtml(targetField)}</div>
+                        <div class="dlg-field">
+                            <label class="dlg-label">目标字段</label>
+                            <div class="dlg-field-value">${escapeHtml(targetField)}</div>
                         </div>
                         
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">默认值</label>
-                            <input type="text" id="defaultValueInput" value="${escapeHtml(currentValue)}" placeholder="请输入默认值" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                        <div class="dlg-field">
+                            <label class="dlg-label">默认值</label>
+                            <input type="text" id="defaultValueInput" value="${escapeHtml(currentValue)}" placeholder="请输入默认值" class="dlg-input" />
                         </div>
                         
-                        <div style="margin-bottom: 20px; padding: 12px; background: #fff3cd; border-radius: 6px; font-size: 13px; color: #856404;">
+                        <div class="dlg-hint dlg-hint--warn">
                             💡 设置后，该字段将始终使用此默认值，无需映射源字段。
                         </div>
                         
-                        <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                            <button onclick="closeDefaultValueModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 14px;">取消</button>
-                            <button onclick="saveDefaultValue(${targetIndex})" style="padding: 10px 20px; border: none; background: #4361ee; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">确定</button>
+                        <div class="dlg-footer">
+                            <button class="dlg-btn dlg-btn--cancel" onclick="closeDefaultValueModal()">取消</button>
+                            <button class="dlg-btn dlg-btn--primary" onclick="saveDefaultValue(${targetIndex})">确定</button>
                         </div>
                     </div>
                 </div>
@@ -2061,7 +2857,7 @@
             renderTargetFields({ headers: previewData.targetHeaders });
             drawMappings();
             updateStats();
-            markConfigChanged();
+            markConfigDirty();
         }
         
         function openLogicRuleModal(targetIndex, targetField) {
@@ -2071,9 +2867,9 @@
             let conditionsHtml = '';
             currentRule.conditions.forEach((cond, idx) => {
                 conditionsHtml += `
-                    <div class="condition-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px; background: #f9f9f9; border-radius: 6px;">
+                    <div class="dlg-condition-row">
                         <span style="color: #666; font-size: 13px;">如果</span>
-                        <select class="condition-source" style="flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select class="condition-source dlg-input" style="flex: 1; padding: 6px 8px;">
                             ${sourceFields.map((f, i) => `<option value="${i}" ${cond.sourceIndex == i ? 'selected' : ''}>${escapeHtml(f)}</option>`).join('')}
                         </select>
                         <select class="condition-operator" style="width: 60px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -2088,42 +2884,42 @@
                         <input type="text" class="condition-value" value="${escapeHtml(cond.value || '')}" placeholder="值" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
                         <span style="color: #666; font-size: 13px;">则</span>
                         <input type="text" class="condition-result" value="${escapeHtml(cond.result || '')}" placeholder="结果" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
-                        <button type="button" onclick="this.closest('.condition-row').remove()" style="background: #ffebee; border: none; color: #e74c3c; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+                        <button type="button" onclick="this.closest('.dlg-condition-row').remove()" class="dlg-condition-del">×</button>
                     </div>
                 `;
             });
             
             const modalHtml = `
-                <div class="modal-overlay" id="logicRuleModalOverlay" onclick="closeLogicRuleModal(event)" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10001;">
-                    <div class="modal-content" onclick="event.stopPropagation()" style="background: white; border-radius: 12px; padding: 24px; min-width: 550px; max-width: 650px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); max-height: 80vh; overflow-y: auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3 style="margin: 0; font-size: 18px; color: #333;">🔀 设置逻辑规则</h3>
-                            <button onclick="closeLogicRuleModal()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #999;">×</button>
+                <div class="dlg-overlay" id="logicRuleModalOverlay" onclick="closeLogicRuleModal(event)">
+                    <div class="dlg-box dlg-box--lg" onclick="event.stopPropagation()">
+                        <div class="dlg-header">
+                            <h3 class="dlg-title">🔀 设置逻辑规则</h3>
+                            <button class="dlg-close" onclick="closeLogicRuleModal()">×</button>
                         </div>
                         
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">目标字段</label>
-                            <div style="padding: 10px 12px; background: #f5f5f5; border-radius: 6px; color: #333;">${escapeHtml(targetField)}</div>
+                        <div class="dlg-field">
+                            <label class="dlg-label">目标字段</label>
+                            <div class="dlg-field-value">${escapeHtml(targetField)}</div>
                         </div>
                         
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">条件规则</label>
-                            <div id="conditionsContainer">${conditionsHtml || '<div style="color: #999; font-size: 13px; padding: 10px;">暂无条件规则</div>'}</div>
+                        <div class="dlg-field">
+                            <label class="dlg-label">条件规则</label>
+                            <div id="conditionsContainer">${conditionsHtml || '<div class="dlg-condition-empty" style="color: #999; font-size: 13px; padding: 10px;">暂无条件规则</div>'}</div>
                             <button type="button" onclick="addConditionRow()" style="margin-top: 8px; padding: 8px 16px; border: 1px dashed #4361ee; background: white; color: #4361ee; border-radius: 6px; cursor: pointer; font-size: 13px;">+ 添加条件</button>
                         </div>
                         
-                        <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #555;">默认值（无匹配时）</label>
-                            <input type="text" id="logicDefaultResult" value="${escapeHtml(currentRule.defaultResult || '')}" placeholder="请输入默认值" style="width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; box-sizing: border-box;" />
+                        <div class="dlg-field">
+                            <label class="dlg-label">默认值（无匹配时）</label>
+                            <input type="text" id="logicDefaultResult" value="${escapeHtml(currentRule.defaultResult || '')}" placeholder="请输入默认值" class="dlg-input" />
                         </div>
                         
-                        <div style="margin-bottom: 20px; padding: 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1565c0;">
+                        <div class="dlg-hint dlg-hint--info">
                             💡 根据其他字段的值动态计算结果。当所有条件都不满足时，使用默认值。
                         </div>
                         
-                        <div style="display: flex; justify-content: flex-end; gap: 12px;">
-                            <button onclick="closeLogicRuleModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-size: 14px;">取消</button>
-                            <button onclick="saveLogicRule(${targetIndex})" style="padding: 10px 20px; border: none; background: #4361ee; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">确定</button>
+                        <div class="dlg-footer">
+                            <button class="dlg-btn dlg-btn--cancel" onclick="closeLogicRuleModal()">取消</button>
+                            <button class="dlg-btn dlg-btn--primary" onclick="saveLogicRule(${targetIndex})">确定</button>
                         </div>
                     </div>
                 </div>
@@ -2142,16 +2938,15 @@
             const container = document.getElementById('conditionsContainer');
             const sourceFields = previewData ? previewData.sourceHeaders : [];
             
-            if (container.querySelector('div[style*="color: #999"]')) {
+            if (container.querySelector('.dlg-condition-empty')) {
                 container.innerHTML = '';
             }
             
             const row = document.createElement('div');
-            row.className = 'condition-row';
-            row.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px; background: #f9f9f9; border-radius: 6px;';
+            row.className = 'dlg-condition-row';
             row.innerHTML = `
                 <span style="color: #666; font-size: 13px;">如果</span>
-                <select class="condition-source" style="flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <select class="condition-source dlg-input" style="flex: 1; padding: 6px 8px;">
                     ${sourceFields.map((f, i) => `<option value="${i}">${escapeHtml(f)}</option>`).join('')}
                 </select>
                 <select class="condition-operator" style="width: 60px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -2166,14 +2961,14 @@
                 <input type="text" class="condition-value" placeholder="值" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
                 <span style="color: #666; font-size: 13px;">则</span>
                 <input type="text" class="condition-result" placeholder="结果" style="width: 100px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px;" />
-                <button type="button" onclick="this.closest('.condition-row').remove()" style="background: #ffebee; border: none; color: #e74c3c; padding: 4px 8px; border-radius: 4px; cursor: pointer;">×</button>
+                <button type="button" onclick="this.closest('.dlg-condition-row').remove()" class="dlg-condition-del">×</button>
             `;
             container.appendChild(row);
         }
         
         function saveLogicRule(targetIndex) {
             const container = document.getElementById('conditionsContainer');
-            const conditionRows = container.querySelectorAll('.condition-row');
+            const conditionRows = container.querySelectorAll('.dlg-condition-row');
             const conditions = [];
             
             conditionRows.forEach(row => {
@@ -2213,7 +3008,7 @@
             renderTargetFields({ headers: previewData.targetHeaders });
             drawMappings();
             updateStats();
-            markConfigChanged();
+            markConfigDirty();
         }
         
         function clearDefaultValueOrLogic(targetIndex) {
@@ -2232,7 +3027,7 @@
             renderTargetFields({ headers: previewData.targetHeaders });
             drawMappings();
             updateStats();
-            markConfigChanged();
+            markConfigDirty();
         }
         
         function removeMapping(targetIndex) {
@@ -2269,6 +3064,7 @@
             updateStats();
             drawMappings();
             updateSteps();
+            markConfigDirty();
         }
         
         function updateStats() {
@@ -2715,7 +3511,8 @@
                     manualMappings: manualMappings,
                     removedMappings: removedMappings,
                     valueTransformRules: cleanedRules,
-                    configName: currentLoadedConfig ? currentLoadedConfig.name : null
+                    configName: currentLoadedConfig ? currentLoadedConfig.name : null,
+                    filterConfig: window.filterConfig || null
                 })
             })
             .then(response => response.json())
@@ -2928,6 +3725,9 @@
                 }
             });
             
+            // 获取筛选配置
+            const currentFilterConfig = window.filterConfig || null;
+            
             const config = {
                 id: existingId || Date.now(),
                 name: name,
@@ -2937,7 +3737,8 @@
                 mappings: finalMappings,
                 valueTransformRules: cleanedValueTransformRules,
                 defaultValues: defaultValues,
-                logicRules: logicRules
+                logicRules: logicRules,
+                filterConfig: currentFilterConfig
             };
             
             const configs = getConfigs();
@@ -2969,6 +3770,7 @@
                 loadConfig(config.id);
                 
                 updateSteps();
+                markConfigSaved();
                 
                 if (shouldTransform) {
                     setTimeout(() => executeTransform(), 100);
@@ -3226,13 +4028,12 @@
             valueTransformRules = config.valueTransformRules || {};
             defaultValues = config.defaultValues || {};
             logicRules = config.logicRules || {};
+            // 恢复筛选配置（仅保存数据，UI在预览弹窗中按需初始化）
+            window.filterConfig = config.filterConfig || null;
             currentLoadedConfig = config;
             
-            console.log('[LoadConfig] 加载的配置:', config);
-            console.log('[LoadConfig] defaultValues:', defaultValues);
-            console.log('[LoadConfig] logicRules:', logicRules);
-            console.log('[LoadConfig] defaultValues 键名:', Object.keys(defaultValues));
-            console.log('[LoadConfig] defaultValues 键名类型:', Object.keys(defaultValues).map(k => typeof k));
+            // 筛选面板已迁移至预览弹窗内，不再在主界面初始化
+            // 当用户打开预览并点击"需要对数据进行筛选"时，会自动加载此配置
             
             // 更新 previewData.mappings 为配置的映射（保留原始 matchType）
             previewData.mappings = (config.mappings || []).map(m => ({
@@ -3241,32 +4042,11 @@
             }));
             
             // 重新渲染目标字段（应用默认值和逻辑规则的样式）
-            console.log('[LoadConfig] 准备渲染目标字段，targetHeaders:', previewData.targetHeaders);
             renderTargetFields({ headers: previewData.targetHeaders });
             
-            // 检查字段 4 的类名
-            const field4 = document.querySelector('#targetFields li[data-index="4"]');
-            if (field4) {
-                console.log('[LoadConfig] renderTargetFields 后字段 4 的类名:', field4.className);
-            }
-            
             updateMappingDisplay();
-            console.log('[LoadConfig] updateMappingDisplay 后');
             updateStats();
-            console.log('[LoadConfig] updateStats 后');
             drawMappings();
-            console.log('[LoadConfig] drawMappings 后');
-            
-            // 再次检查字段 4 的类名
-            const field4After = document.querySelector('#targetFields li[data-index="4"]');
-            if (field4After) {
-                console.log('[LoadConfig] 所有操作完成后字段 4 的类名:', field4After.className);
-                console.log('[LoadConfig] 字段 4 的计算样式:', {
-                    backgroundColor: window.getComputedStyle(field4After).backgroundColor,
-                    borderLeftColor: window.getComputedStyle(field4After).borderLeftColor,
-                    animation: window.getComputedStyle(field4After).animation
-                });
-            }
             
             Object.keys(valueTransformRules).forEach(key => {
                 const [sourceIndex, targetIndex] = key.split('_').map(Number);
@@ -3280,6 +4060,7 @@
             
             closeLoadConfigModal();
             updateSteps();
+            markConfigSaved();
             
             showSuccess(`配置 "${config.name}" 已应用！`);
         }
@@ -3656,3 +4437,321 @@
                 showError('删除配置失败');
             }
         }
+        
+        // ========== 数据筛选功能 ==========
+        
+        // 切换筛选面板展开/收起
+        function toggleFilterPanel() {
+            const section = document.getElementById('filterSection');
+            const content = section ? section.querySelector('.filter-section-content') : null;
+            const icon = document.getElementById('filterCollapseIcon');
+            const btn = document.getElementById('filterCollapseBtn');
+            
+            if (!section || !content) return;
+            
+            if (content.style.display === 'none') {
+                // 展开
+                content.style.display = 'block';
+                if (icon) icon.textContent = '▼';
+                if (btn) btn.title = '收起筛选面板';
+            } else {
+                // 收起
+                content.style.display = 'none';
+                if (icon) icon.textContent = '▲';
+                if (btn) btn.title = '展开筛选面板';
+            }
+        }
+        
+        // ========== Day 7: 加载状态和错误提示组件 ==========
+        
+        // 全局加载指示器
+        function showGlobalLoading(message = '加载中...') {
+            const loading = document.createElement('div');
+            loading.id = 'globalLoading';
+            loading.className = 'global-loading';
+            loading.innerHTML = `
+                <div class="loading-spinner"></div>
+                <div class="loading-message">${message}</div>
+            `;
+            document.body.appendChild(loading);
+            return loading;
+        }
+        
+        function hideGlobalLoading(loadingElement) {
+            if (loadingElement && loadingElement.parentElement) {
+                loadingElement.remove();
+            }
+        }
+        
+        // 错误提示组件 (Toast)
+        class ErrorToast {
+            static show(message, type = 'error', duration) {
+                const toast = document.createElement('div');
+                toast.className = `error-toast ${type}`;
+                
+                const icon = type === 'error' ? '❌' : type === 'success' ? '✅' : '⚠️';
+                
+                // 使用常量或默认值
+                const toastDuration = duration || DAY7_CONSTANTS.TOAST_DURATION[type] || DAY7_CONSTANTS.TOAST_DURATION.error;
+                
+                toast.innerHTML = `
+                    <span class="toast-icon">${icon}</span>
+                    <span class="toast-message">${message}</span>
+                    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+                `;
+                
+                document.body.appendChild(toast);
+                
+                // 自动消失
+                setTimeout(() => {
+                    if (toast.parentElement) {
+                        toast.remove();
+                    }
+                }, toastDuration);
+                
+                return toast;
+            }
+        }
+        
+        // 字段加载错误显示
+        function showFieldLoadError(error) {
+            const container = document.getElementById('filterPanelContainer');
+            if (!container) return;
+            
+            const errorInfo = getDetailedErrorMessage(error);
+            
+            container.innerHTML = `
+                <div class="field-load-error">
+                    <div class="error-icon">⚠️</div>
+                    <div class="error-title">${errorInfo.title}</div>
+                    <div class="error-message">${errorInfo.message}</div>
+                    <div class="error-suggestion">💡 ${errorInfo.suggestion}</div>
+                    <button class="btn-retry" onclick="retryLoadSourceFields()">🔄 重试</button>
+                </div>
+            `;
+        }
+        
+        // 重试加载字段列表
+        async function retryLoadSourceFields() {
+            const container = document.getElementById('filterPanelContainer');
+            if (!container) return;
+            
+            // 清除错误显示
+            container.innerHTML = '';
+            
+            // 重新加载
+            const loaded = await loadSourceFields();
+            if (loaded) {
+                // 重新初始化筛选面板
+                await initFilterPanel();
+            } else {
+                // 再次显示错误
+                showFieldLoadError(new Error('加载失败'));
+            }
+        }
+        
+        // 详细错误信息映射
+        function getDetailedErrorMessage(error) {
+            const errorMap = {
+                'Failed to fetch': {
+                    title: '无法连接到服务器',
+                    message: '请检查您的网络连接，或确认服务器是否正常运行',
+                    suggestion: '刷新页面后重试'
+                },
+                'HTTP 400': {
+                    title: '请求参数错误',
+                    message: '筛选配置格式不正确',
+                    suggestion: '检查筛选条件是否配置完整'
+                },
+                'HTTP 404': {
+                    title: '接口不存在',
+                    message: '服务器未找到对应的接口',
+                    suggestion: '请联系管理员'
+                },
+                'HTTP 500': {
+                    title: '服务器错误',
+                    message: '服务器内部错误',
+                    suggestion: '请稍后重试'
+                },
+                'HTTP 503': {
+                    title: '服务不可用',
+                    message: '服务器暂时不可用',
+                    suggestion: '请稍后重试'
+                },
+                'timeout': {
+                    title: '请求超时',
+                    message: '服务器响应时间过长',
+                    suggestion: '检查网络状态后重试'
+                }
+            };
+            
+            // 匹配错误信息
+            for (const [key, info] of Object.entries(errorMap)) {
+                if (error.message && error.message.includes(key)) {
+                    return info;
+                }
+            }
+            
+            // 默认错误信息
+            return {
+                title: '未知错误',
+                message: error.message || '发生了一个错误',
+                suggestion: '请重试或联系管理员'
+            };
+        }
+        
+        // 新手引导
+        function showFilterGuide() {
+            const guide = document.createElement('div');
+            guide.className = 'filter-guide-overlay';
+            guide.innerHTML = `
+                <div class="filter-guide">
+                    <h4 style="margin-top: 0; color: #303133;">🔍 数据筛选功能</h4>
+                    <p style="color: #606266; margin: 10px 0;">通过设置筛选条件，只转换符合条件的数据行</p>
+                    
+                    <div class="guide-examples" style="margin: 15px 0;">
+                        <h5 style="margin: 10px 0; color: #303133;">常见场景：</h5>
+                        <ul style="margin: 5px 0; padding-left: 20px; color: #606266;">
+                            <li>📅 日期筛选：只转换 2026 年 3 月 1 日之后的数据</li>
+                            <li>💰 金额筛选：只转换金额 > 1000 的记录</li>
+                            <li>✅ 状态筛选：只转换状态为"已完成"的订单</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="guide-tips" style="margin: 15px 0;">
+                        <h5 style="margin: 10px 0; color: #303133;">使用技巧：</h5>
+                        <ol style="margin: 5px 0; padding-left: 20px; color: #606266;">
+                            <li>勾选"启用筛选"开启功能</li>
+                            <li>点击"添加条件"设置筛选规则</li>
+                            <li>可添加多个条件，支持 AND/OR 组合</li>
+                            <li>实时预览筛选结果</li>
+                        </ol>
+                    </div>
+                    
+                    <button class="btn-guide-close" onclick="closeFilterGuide()" style="margin-top: 15px; padding: 8px 20px; background: #409EFF; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">我知道了</button>
+                </div>
+            `;
+            
+            document.body.appendChild(guide);
+        }
+        
+        function closeFilterGuide() {
+            const guide = document.querySelector('.filter-guide-overlay');
+            if (guide) {
+                guide.remove();
+            }
+            localStorage.setItem('filterGuideShown', 'true');
+        }
+        
+        // 检查是否需要显示新手引导
+        function checkAndShowFilterGuide() {
+            if (!localStorage.getItem('filterGuideShown')) {
+                showFilterGuide();
+                localStorage.setItem('filterGuideShown', 'true');
+            }
+        }
+        
+        // 加载源字段列表（优化版）
+        async function loadSourceFields() {
+            // 先检查缓存
+            const cached = fieldCache.get();
+            if (cached) {
+                sourceFields = cached;
+                return true;
+            }
+            
+            const loading = showGlobalLoading(DAY7_CONSTANTS.LOADING_MESSAGES.loadingFields);
+            
+            try {
+                const response = await fetch('/api/filter/fields');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    sourceFields = data.fields;
+                    // 更新缓存
+                    fieldCache.set(sourceFields);
+                    return true;
+                } else {
+                    console.error('加载源字段列表失败:', data.message);
+                    ErrorToast.show('字段列表加载失败：' + (data.message || '未知错误'), 'error');
+                    return false;
+                }
+            } catch (error) {
+                console.error('加载源字段列表失败:', error);
+                ErrorToast.show('加载失败：' + error.message, 'error');
+                return false;
+            } finally {
+                hideGlobalLoading(loading);
+            }
+        }
+        
+        // 初始化筛选面板（优化版）
+        async function initFilterPanel() {
+            // 只在有源文件时才加载字段列表
+            if (!sourceFileAnalysis) {
+                return;
+            }
+            
+            const loading = showGlobalLoading(DAY7_CONSTANTS.LOADING_MESSAGES.initializingPanel);
+            
+            try {
+                // 初始化全局筛选配置
+                if (!window.filterConfig) {
+                    window.filterConfig = {
+                        enabled: false,
+                        combinationMode: 'AND',
+                        rules: []
+                    };
+                }
+                
+                // 加载字段列表
+                const loaded = await loadSourceFields();
+                
+                if (!loaded) {
+                    // 字段列表加载失败，显示错误界面
+                    showFieldLoadError(new Error('字段列表加载失败'));
+                    return;
+                }
+                
+                // 创建 FilterPanel 实例
+                const container = document.getElementById('filterPanelContainer');
+                if (container && typeof FilterPanel !== 'undefined') {
+                    window.filterPanel = new FilterPanel({
+                        fields: sourceFields,
+                        filterConfig: window.filterConfig,
+                        containerId: 'filterPanelContainer',
+                        operators: window.FILTER_OPERATORS || [],
+                        onConfigChange: (config) => {
+                            window.filterConfig = config;
+                            log('筛选配置已更新:', config);
+                            markConfigDirty();
+                        }
+                    });
+                    
+                    container.appendChild(window.filterPanel.render());
+                    
+                    // 如果筛选功能已启用且有规则，主动触发一次预览刷新
+                    if (window.filterConfig.enabled && window.filterConfig.rules && window.filterConfig.rules.length > 0) {
+                        // 延迟一下，确保 FilterPanel 已经完全渲染
+                        setTimeout(() => {
+                            if (window.filterPanel) {
+                                window.filterPanel.fetchPreview();
+                            }
+                        }, 100);
+                    }
+                }
+            } catch (error) {
+                console.error('初始化筛选面板失败:', error);
+                ErrorToast.show('初始化失败：' + error.message, 'error');
+                showFieldLoadError(error);
+            } finally {
+                hideGlobalLoading(loading);
+            }
+        }
+        
+        // 页面加载时不再自动初始化筛选面板
+        // 而是在上传源文件后自动初始化

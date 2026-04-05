@@ -206,7 +206,7 @@ function applyValueTransformForOutput(value, rule, errors = null) {
 
 
 
-function transformData(source, target, mapping, valueRules) {
+function transformData(source, target, mapping, valueRules, filterConfig) {
     const result = {
         headerValues: [],
         dataRows: [],
@@ -229,15 +229,40 @@ function transformData(source, target, mapping, valueRules) {
         sourceIndexMap[m.targetIndex] = m.sourceIndex;
     });
     
-    console.log(`  源数据行数: ${source.dataRows.length}`);
+    // 应用筛选配置
+    let dataRowsToTransform = source.dataRows;
+    let filteredRowsCount = 0;
+    if (filterConfig && filterConfig.enabled) {
+        try {
+            const filterModule = require('./public/js/filter/index');
+            const filter = filterModule.createFilter(filterConfig);
+            const filterResult = filter.filter({
+                headers: source.dataHeaders,
+                rows: source.dataRows
+            });
+            dataRowsToTransform = filterResult.rows;
+            filteredRowsCount = filterResult.statistics.filteredRows;
+            console.log(`  筛选后行数：${dataRowsToTransform.length} (过滤了 ${filteredRowsCount} 行)`);
+            logger.info({ 
+                totalRows: filterResult.statistics.totalRows,
+                matchedRows: filterResult.statistics.matchedRows,
+                filteredRows: filterResult.statistics.filteredRows
+            }, '筛选应用成功');
+        } catch (filterError) {
+            console.error('筛选失败，使用原始数据:', filterError);
+            logger.warn({ error: filterError.message }, '筛选失败，使用原始数据');
+        }
+    }
+    
+    console.log(`  源数据行数: ${dataRowsToTransform.length}`);
     console.log(`  目标列数: ${target.dataHeaders.length}`);
     console.log(`  字段映射数: ${mapping.columnMappings.length}`);
-    logger.info({ sourceRows: source.dataRows.length, targetCols: target.dataHeaders.length, mappingCount: mapping.columnMappings.length }, 'Transform started');
+    logger.info({ sourceRows: dataRowsToTransform.length, targetCols: target.dataHeaders.length, mappingCount: mapping.columnMappings.length }, 'Transform started');
     if (valueRules && Object.keys(valueRules).length > 0) {
         console.log(`  值转换规则数: ${Object.keys(valueRules).length}`);
     }
     
-    source.dataRows.forEach((row, rowIdx) => {
+    dataRowsToTransform.forEach((row, rowIdx) => {
         const newRow = [];
         
         target.dataHeaders.forEach((th, tIdx) => {

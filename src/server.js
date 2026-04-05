@@ -30,6 +30,7 @@ const { buildFieldMapping, previewTransformation, applyManualMappings } = requir
 const { transformData, buildOutputRows, writeOutputFile, applyValueTransformForOutput } = require('./dataTransformer');
 const { sessionManager } = require('./sessionContext');
 const { sessionMiddleware, setSessionCookie } = require('./middleware/session');
+const filterModule = require('./public/js/filter/index');
 
 function startWebServer() {
     return new Promise((resolve, reject) => {
@@ -99,6 +100,27 @@ function startWebServer() {
                         sessionId: req.sessionId,
                         sessionCount: sessionManager.getSessionCount()
                     }));
+                    return;
+                }
+                
+                // 筛选功能 API
+                if (req.url === '/api/filter/fields' && req.method === 'GET') {
+                    handleFilterFields(req, res);
+                    return;
+                }
+                
+                if (req.url === '/api/filter/preview' && req.method === 'POST') {
+                    handleFilterPreview(req, res);
+                    return;
+                }
+                
+                if (req.url === '/api/filter/apply' && req.method === 'POST') {
+                    handleFilterApply(req, res);
+                    return;
+                }
+                
+                if (req.url === '/api/filter/validate-expression' && req.method === 'POST') {
+                    handleFilterValidateExpression(req, res);
                     return;
                 }
                 
@@ -416,10 +438,22 @@ async function handleConfirm(req, res, server, resolvePromise) {
                         });
                     }
                     
+                    // 获取筛选配置
+                    const filterConfig = requestData.filterConfig || null;
+                    
+                    // 执行数据转换（包括筛选）
+                    const transformedData = transformData(
+                        req.session.sourceAnalysis,
+                        req.session.targetAnalysis,
+                        mapping,
+                        valueTransformRules,
+                        filterConfig
+                    );
+                    
                     // 构建输出数据
                     const outputResult = buildOutputRows(
                         req.session.targetAnalysis,
-                        req.session.sourceAnalysis,
+                        transformedData,
                         mapping,
                         req.session.targetData
                     );
@@ -488,6 +522,279 @@ async function handleConfirm(req, res, server, resolvePromise) {
     }
 }
 
+// 筛选功能 API 处理函数
+async function handleFilterFields(req, res) {
+    try {
+        if (!req.session.sourceAnalysis) {
+            const error = createError(
+                ERROR_TYPES.INVALID_STATE,
+                ERROR_CODES.INVALID_STATE,
+                '请先上传并分析源文件'
+            );
+            logErrorHandler(error, { url: req.url, method: req.method });
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(formatErrorResponse(error)));
+            return;
+        }
+        
+        const sourceHeaders = req.session.sourceAnalysis.dataHeaders || [];
+        
+        // 为每个字段推断类型
+        const XLSX = require('xlsx');
+        const sourceWorkbook = XLSX.readFile(req.session.sourceFilePath);
+        const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+        const sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
+        const dataRows = sourceData.slice(1); // 跳过表头
+        
+        const fields = sourceHeaders.map((header, index) => {
+            // 收集该字段的所有值
+            const values = dataRows.map(row => row[index]).filter(v => v !== null && v !== undefined && v !== '');
+            
+            // 使用类型推断器
+            const typeInferencer = filterModule.createFieldTypeInferencer();
+            const dataType = typeInferencer.infer(values);
+            
+            return {
+                index,
+                name: header,
+                dataType,
+                sampleValues: values.slice(0, 5), // 前 5 个样本值
+                totalRows: values.length
+            };
+        });
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            fields
+        }));
+        
+        logger.info({ sessionId: req.sessionId, fieldCount: fields.length }, '获取筛选字段列表完成');
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+async function handleFilterPreview(req, res) {
+    try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const requestData = JSON.parse(body);
+                const filterConfig = requestData.filterConfig;
+                const previewSize = requestData.previewSize || 100;
+                
+                if (!filterConfig) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.MISSING_PARAMETER,
+                        '缺少筛选配置'
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                // 验证配置
+                const validation = filterModule.validateConfig(filterConfig);
+                if (!validation.valid) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.INVALID_CONFIG,
+                        '筛选配置无效',
+                        validation.errors.join(', ')
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                // 读取源数据
+                const XLSX = require('xlsx');
+                const sourceWorkbook = XLSX.readFile(req.session.sourceFilePath);
+                const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+                const sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
+                
+                const headers = sourceData[0];
+                const rows = sourceData.slice(1);
+                
+                // 创建筛选器并执行预览
+                const filter = filterModule.createFilter(filterConfig);
+                const preview = filter.preview({ headers, rows }, previewSize);
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    preview: {
+                        totalRows: preview.totalRows,
+                        matchedRows: preview.matchedRows,
+                        filteredRows: preview.totalRows - preview.matchedRows,
+                        matchRate: preview.matchRate,
+                        previewData: preview.previewData,
+                        previewHeaders: preview.previewHeaders || headers, // 添加字段名
+                        executionTime: preview.executionTime
+                    }
+                }));
+                
+                logger.info({ 
+                    sessionId: req.sessionId, 
+                    totalRows: preview.totalRows,
+                    matchedRows: preview.matchedRows,
+                    executionTime: preview.executionTime
+                }, '筛选预览完成');
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+async function handleFilterApply(req, res) {
+    try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const requestData = JSON.parse(body);
+                const filterConfig = requestData.filterConfig;
+                
+                if (!filterConfig) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.MISSING_PARAMETER,
+                        '缺少筛选配置'
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                // 验证配置
+                const validation = filterModule.validateConfig(filterConfig);
+                if (!validation.valid) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.INVALID_CONFIG,
+                        '筛选配置无效',
+                        validation.errors.join(', ')
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                // 读取源数据
+                const XLSX = require('xlsx');
+                const sourceWorkbook = XLSX.readFile(req.session.sourceFilePath);
+                const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+                const sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
+                
+                const headers = sourceData[0];
+                const rows = sourceData.slice(1);
+                
+                // 创建筛选器并执行过滤
+                const filter = filterModule.createFilter(filterConfig);
+                const result = filter.filter({ headers, rows });
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    success: true,
+                    result: {
+                        totalRows: result.statistics.totalRows,
+                        matchedRows: result.statistics.matchedRows,
+                        filteredRows: result.statistics.filteredRows,
+                        matchRate: result.statistics.matchRate,
+                        executionTime: result.statistics.executionTime
+                    }
+                }));
+                
+                logger.info({ 
+                    sessionId: req.sessionId, 
+                    totalRows: result.statistics.totalRows,
+                    matchedRows: result.statistics.matchedRows,
+                    executionTime: result.statistics.executionTime
+                }, '筛选应用完成');
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
+async function handleFilterValidateExpression(req, res) {
+    try {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            try {
+                const requestData = JSON.parse(body);
+                const expression = requestData.expression;
+                const rules = requestData.rules || [];
+                
+                if (!expression) {
+                    const error = createError(
+                        ERROR_TYPES.INVALID_INPUT,
+                        ERROR_CODES.MISSING_PARAMETER,
+                        '缺少表达式'
+                    );
+                    logErrorHandler(error, { url: req.url, method: req.method });
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(formatErrorResponse(error)));
+                    return;
+                }
+                
+                // 验证表达式语法
+                try {
+                    const { Parser } = require('expr-eval');
+                    const parser = new Parser();
+                    parser.parse(expression);
+                    
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        valid: true,
+                        message: '表达式语法正确'
+                    }));
+                } catch (parseError) {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        success: true,
+                        valid: false,
+                        message: `表达式语法错误：${parseError.message}`
+                    }));
+                }
+            } catch (error) {
+                logErrorHandler(error, { url: req.url, method: req.method });
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(formatErrorResponse(error)));
+            }
+        });
+    } catch (error) {
+        logErrorHandler(error, { url: req.url, method: req.method });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(formatErrorResponse(error)));
+    }
+}
+
 async function handlePreview(req, res, server, resolvePromise) {
     try {
         if (!req.session.isReadyForMapping()) {
@@ -509,8 +816,9 @@ async function handlePreview(req, res, server, resolvePromise) {
             try {
                 const requestData = JSON.parse(body);
                 const previewRows = requestData.previewRows || 10;
+                const filterConfig = requestData.filterConfig; // 获取筛选配置
                 
-                // 读取源数据前 N 行
+                // 读取源数据
                 const xlsxLib = require('xlsx');
                 const sourceWorkbook = xlsxLib.readFile(req.session.sourceFilePath);
                 const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
@@ -518,7 +826,30 @@ async function handlePreview(req, res, server, resolvePromise) {
                 
                 // 获取表头和数据行
                 const sourceHeaders = sourceData[0];
-                const sourceRows = sourceData.slice(1, previewRows + 1);
+                let sourceRows = sourceData.slice(1); // 先取所有行
+                
+                // 如果有筛选配置，应用筛选
+                let filteredRows = sourceRows;
+                let matchedRows = sourceRows.length;
+                if (filterConfig && filterConfig.enabled && filterConfig.rules && filterConfig.rules.length > 0) {
+                    // 使用筛选模块
+                    const filterModule = require('./public/js/filter');
+                    const filter = filterModule.createFilter(filterConfig);
+                    
+                    // 构建数据对象
+                    const data = {
+                        headers: sourceHeaders,
+                        rows: sourceRows
+                    };
+                    
+                    // 执行筛选
+                    const filterResult = filter.filter(data, filterConfig);
+                    filteredRows = filterResult.rows;
+                    matchedRows = filterResult.statistics.matchedRows;
+                }
+                
+                // 取前 N 行用于预览
+                const previewDataRows = filteredRows.slice(0, previewRows);
                 
                 // 构建映射关系
                 const mapping = buildFieldMapping(req.session.sourceAnalysis, req.session.targetAnalysis);
@@ -564,9 +895,28 @@ async function handlePreview(req, res, server, resolvePromise) {
                 console.log('[Preview] 接收到的值转换规则:', JSON.stringify(valueTransformRules, null, 2));
                 console.log('[Preview] 映射关系数量:', mapping.columnMappings.length);
                 
-                // 转换数据
-                const transformedRows = [];
+                // 转换数据 - 处理所有行，标记被过滤的行
+                const allTransformedRows = [];
+                const filteredIndices = new Set(); // 记录被过滤的行索引
+                
+                // 如果有筛选，先找出被过滤的行索引
+                if (filteredRows !== sourceRows) {
+                    // 创建一个映射来快速查找
+                    const filteredSet = new Set(filteredRows.map((row, idx) => {
+                        // 使用 JSON 字符串作为唯一标识
+                        return JSON.stringify(row);
+                    }));
+                    
+                    sourceRows.forEach((row, idx) => {
+                        const rowStr = JSON.stringify(row);
+                        if (!filteredSet.has(rowStr)) {
+                            filteredIndices.add(idx);
+                        }
+                    });
+                }
+                
                 sourceRows.forEach((sourceRow, rowIndex) => {
+                    const isFiltered = filteredIndices.has(rowIndex);
                     const targetRow = {};
                     
                     req.session.targetAnalysis.dataHeaders.forEach((targetHeader, targetIndex) => {
@@ -576,18 +926,18 @@ async function handlePreview(req, res, server, resolvePromise) {
                         if (mappingInfo && mappingInfo.sourceIndex !== undefined) {
                             let value = sourceRow[mappingInfo.sourceIndex];
                             
-                            // 应用值转换规则
-                            const ruleKey = `${mappingInfo.sourceIndex}_${targetIndex}`;
-                            console.log(`[Preview] 检查字段 ${targetHeader}: ruleKey=${ruleKey}, sourceValue=${value}, 有规则=${!!valueTransformRules[ruleKey]}`);
-                            if (valueTransformRules[ruleKey] && Array.isArray(valueTransformRules[ruleKey])) {
-                                const rules = valueTransformRules[ruleKey];
-                                console.log(`[Preview] 应用规则:`, JSON.stringify(rules, null, 2));
-                                
-                                // 遍历应用所有转换规则
-                                rules.forEach(rule => {
-                                    value = applyValueTransformForOutput(value, rule);
-                                });
-                                console.log(`[Preview] 转换后值：${value}`);
+                            // 如果被过滤，不应用转换规则，目标值为空
+                            if (!isFiltered) {
+                                // 应用值转换规则
+                                const ruleKey = `${mappingInfo.sourceIndex}_${targetIndex}`;
+                                if (valueTransformRules[ruleKey] && Array.isArray(valueTransformRules[ruleKey])) {
+                                    const rules = valueTransformRules[ruleKey];
+                                    rules.forEach(rule => {
+                                        value = applyValueTransformForOutput(value, rule);
+                                    });
+                                }
+                            } else {
+                                value = ''; // 被过滤的行，目标值为空
                             }
                             
                             targetRow[targetHeader] = value !== undefined && value !== null ? value : '';
@@ -597,7 +947,10 @@ async function handlePreview(req, res, server, resolvePromise) {
                         }
                     });
                     
-                    transformedRows.push(targetRow);
+                    // 添加过滤标记和原始索引
+                    targetRow._isFiltered = isFiltered;
+                    targetRow._originalIndex = rowIndex;
+                    allTransformedRows.push(targetRow);
                 });
                 
                 // 返回预览数据
@@ -607,15 +960,25 @@ async function handlePreview(req, res, server, resolvePromise) {
                     previewData: {
                         source: {
                             headers: sourceHeaders,
-                            rows: sourceRows.map(row => {
+                            rows: sourceRows.map((row, idx) => {
                                 const obj = {};
                                 sourceHeaders.forEach((h, i) => obj[h] = row[i] !== undefined ? row[i] : '');
+                                // 添加过滤标记
+                                obj._isFiltered = filteredIndices.has(idx);
+                                obj._originalIndex = idx;
                                 return obj;
                             })
                         },
                         target: {
                             headers: req.session.targetAnalysis.dataHeaders,
-                            rows: transformedRows
+                            rows: allTransformedRows
+                        },
+                        // 筛选信息
+                        filterInfo: {
+                            isFiltered: !!(filterConfig && filterConfig.enabled && filterConfig.rules && filterConfig.rules.length > 0),
+                            totalRows: sourceRows.length,
+                            filteredRows: matchedRows,
+                            hasFilteredData: matchedRows < sourceRows.length
                         }
                     },
                     // 返回当前实际生效的映射关系（包括自动映射和手动映射，排除已移除的）
@@ -628,13 +991,16 @@ async function handlePreview(req, res, server, resolvePromise) {
                     // 返回值转换规则信息
                     valueTransformRules: requestData.valueTransformRules || {},
                     statistics: {
-                        totalRows: req.session.sourceAnalysis.dataRows.length,
-                        previewRows: transformedRows.length,
-                        mappedFields: mapping.columnMappings.length
+                        totalRows: req.session.sourceAnalysis.dataRows.length, // 原始总行数
+                        filteredRows: matchedRows, // 筛选后行数
+                        previewRows: allTransformedRows.length, // 预览行数（所有行）
+                        mappedFields: mapping.columnMappings.length,
+                        isFiltered: !!(filterConfig && filterConfig.enabled && filterConfig.rules && filterConfig.rules.length > 0),
+                        hasFilteredData: matchedRows < req.session.sourceAnalysis.dataRows.length // 是否有数据被过滤
                     }
                 }));
                 
-                logger.info({ sessionId: req.sessionId, previewRows: transformedRows.length }, '数据预览完成');
+                logger.info({ sessionId: req.sessionId, previewRows: allTransformedRows.length }, '数据预览完成');
             } catch (error) {
                 logErrorHandler(error, { url: req.url, method: req.method });
                 res.writeHead(500, { 'Content-Type': 'application/json' });

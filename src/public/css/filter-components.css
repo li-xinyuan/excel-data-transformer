@@ -1,0 +1,817 @@
+/**
+ * 数据筛选功能样式
+ * 筛选配置面板和组件样式
+ */
+
+/* ==================== 筛选配置面板 ==================== */
+.filter-panel {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.filter-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.filter-panel-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-panel-title::before {
+    content: '🔍';
+    font-size: 20px;
+}
+
+.filter-panel-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.filter-panel-config-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.filter-enable-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.filter-enable-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+/* ==================== 配置管理按钮 ==================== */
+.btn-config-action {
+    padding: 6px 12px;
+    font-size: 13px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    background: #fff;
+    color: #606266;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.btn-config-action:hover {
+    border-color: #409eff;
+    color: #409eff;
+    background: #ecf5ff;
+}
+
+.btn-config-action.btn-reset:hover {
+    border-color: #f56c6c;
+    color: #f56c6c;
+    background: #fef0f0;
+}
+
+/* ==================== 条件列表 ==================== */
+.filter-conditions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+/* ==================== 条件卡片 ==================== */
+.filter-rule-card {
+    background: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 15px;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.filter-rule-card:hover {
+    border-color: #409eff;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+}
+
+.filter-rule-card.disabled {
+    opacity: 0.6;
+    background: #f5f5f5;
+}
+
+.filter-rule-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.filter-rule-combination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #666;
+}
+
+.filter-rule-combination select {
+    padding: 4px 8px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    background: #fff;
+}
+
+.filter-rule-combination select:hover {
+    border-color: #409eff;
+}
+
+.filter-rule-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-rule-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.filter-rule-actions button {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+}
+
+.filter-rule-actions button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-move-rule {
+    background: #e6e8eb;
+    color: #606266;
+}
+
+.btn-move-rule:hover:not(:disabled) {
+    background: #dcdfe6;
+}
+
+.btn-duplicate-rule {
+    background: #91d5ff;
+    color: #fff;
+    font-size: 14px;
+}
+
+.btn-duplicate-rule:hover {
+    background: #bae7ff;
+}
+
+.btn-delete-rule {
+    background: #f56c6c;
+    color: #fff;
+}
+
+.btn-delete-rule:hover {
+    background: #ff7878;
+}
+
+.btn-disable-rule {
+    background: #909399;
+    color: #fff;
+}
+
+.btn-disable-rule:hover {
+    background: #a6a9ad;
+}
+
+/* ==================== 条件内容行 ==================== */
+.filter-rule-content {
+    display: grid;
+    grid-template-columns: 2fr 1.5fr 2fr auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.filter-field-selector,
+.filter-operator-selector,
+.filter-value-input {
+    position: relative;
+}
+
+.filter-field-selector select,
+.filter-operator-selector select,
+.filter-value-input input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.filter-field-selector select:hover,
+.filter-operator-selector select:hover,
+.filter-value-input input:hover {
+    border-color: #409eff;
+}
+
+.filter-field-selector select:focus,
+.filter-operator-selector select:focus,
+.filter-value-input input:focus {
+    border-color: #409eff;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+/* 字段类型标识 */
+.field-type-icon {
+    display: inline-block;
+    width: 20px;
+    text-align: center;
+    margin-right: 4px;
+    font-size: 12px;
+}
+
+/* ==================== 值输入框特殊样式 ==================== */
+.filter-value-input input[type="date"] {
+    font-family: inherit;
+}
+
+.filter-value-input .multi-value-input {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-value-input .multi-value-input input {
+    flex: 1;
+}
+
+.filter-value-input .value-separator {
+    color: #909399;
+    font-weight: bold;
+}
+
+/* ==================== 添加条件按钮 ==================== */
+.filter-add-rule-btn {
+    width: 100%;
+    padding: 12px;
+    background: #f0f9ff;
+    border: 2px dashed #409eff;
+    border-radius: 6px;
+    color: #409eff;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.filter-add-rule-btn:hover {
+    background: #ecf5ff;
+    border-color: #66b1ff;
+}
+
+.filter-add-rule-btn::before {
+    content: '+';
+    font-size: 18px;
+    font-weight: bold;
+}
+
+/* ==================== 预览面板 ==================== */
+.filter-preview-panel {
+    background: #f0f9ff;
+    border: 1px solid #b3d8ff;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 20px;
+}
+
+.filter-preview-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #409eff;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.filter-preview-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.filter-preview-stat {
+    background: #fff;
+    padding: 10px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.filter-preview-stat-label {
+    font-size: 12px;
+    color: #909399;
+    margin-bottom: 4px;
+}
+
+.filter-preview-stat-value {
+    font-size: 20px;
+    font-weight: bold;
+    color: #303133;
+}
+
+.filter-preview-stat-value.matched {
+    color: #67c23a;
+}
+
+.filter-preview-stat-value.filtered {
+    color: #f56c6c;
+}
+
+.filter-preview-stat-value.rate {
+    color: #409eff;
+}
+
+.filter-preview-execution-time {
+    font-size: 12px;
+    color: #909399;
+    text-align: right;
+    margin-top: 8px;
+}
+
+/* ==================== 预览信息 ==================== */
+.filter-preview-info {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.filter-preview-note {
+    font-size: 12px;
+    color: #e6a23c;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+/* ==================== 加载状态 ==================== */
+.filter-preview-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #909399;
+    font-size: 14px;
+}
+
+.filter-preview-loading::before {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e0e0e0;
+    border-top-color: #409eff;
+    border-radius: 50%;
+    margin-right: 8px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==================== 错误状态 ==================== */
+.filter-preview-error {
+    text-align: center;
+    padding: 20px;
+    background: #fef0f0;
+    border: 1px solid #fde2e2;
+    border-radius: 4px;
+    margin-top: 15px;
+}
+
+.filter-preview-error-icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+}
+
+.filter-preview-error-message {
+    color: #f56c6c;
+    font-size: 14px;
+    margin-bottom: 15px;
+}
+
+.filter-preview-retry-btn {
+    background: #409eff;
+    color: #fff;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.filter-preview-retry-btn:hover {
+    background: #66b1ff;
+}
+
+/* ==================== 预览表格 ==================== */
+.filter-preview-table-container {
+    margin-top: 20px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.filter-preview-table-title {
+    background: #f5f7fa;
+    padding: 12px 15px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #606266;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.filter-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.filter-preview-table thead {
+    background: #fafafa;
+}
+
+.filter-preview-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: #606266;
+    border-bottom: 1px solid #e0e0e0;
+    white-space: nowrap;
+}
+
+.filter-preview-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #303133;
+}
+
+.filter-preview-table tbody tr:hover {
+    background: #f5f7fa;
+}
+
+.filter-preview-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* 表格滚动 */
+.filter-preview-table-container {
+    overflow-x: auto;
+}
+
+.filter-preview-table {
+    min-width: 100%;
+}
+
+/* ==================== 空状态 ==================== */
+.filter-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #909399;
+}
+
+.filter-empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+.filter-empty-state-text {
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+/* ==================== 响应式设计 ==================== */
+@media (max-width: 768px) {
+    .filter-rule-content {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .filter-panel-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+    }
+    
+    .filter-panel-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+/* ==================== 动画效果 ==================== */
+@keyframes filterFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.filter-rule-card {
+    animation: filterFadeIn 0.3s ease;
+}
+
+@keyframes filterHighlight {
+    0%, 100% {
+        background: #f9f9f9;
+    }
+    50% {
+        background: #ecf5ff;
+    }
+}
+
+.filter-rule-card.updated {
+    animation: filterHighlight 1s ease;
+}
+
+/* ==================== 工具提示 ==================== */
+.filter-tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+    margin-left: 4px;
+    color: #909399;
+}
+
+.filter-tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #303133;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.2s;
+    z-index: 1000;
+}
+
+.filter-tooltip:hover::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-4px);
+}
+
+/* ==================== 预览弹窗内嵌筛选面板样式（竖向按钮 + 滑出面板 + 可拖动分隔线） ==================== */
+
+/* ---------- 1. 左侧竖向触发按钮 ---------- */
+.preview-filter-trigger {
+    width: 34px;
+    min-width: 34px;
+    flex-shrink: 0;
+    background: #f5f7fa;
+    border-right: 1px solid #e4e7ed;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.preview-filter-trigger:hover {
+    background: #ecf5ff;
+}
+
+.preview-filter-trigger .trigger-text {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-size: 14px;
+    font-weight: 600;
+    color: #606266;
+    letter-spacing: 4px;
+    line-height: 1.2;
+}
+
+.preview-filter-trigger .trigger-icon {
+    font-size: 16px;
+}
+
+.preview-filter-trigger.active {
+    background: #409eff;
+    border-color: #409eff;
+}
+
+.preview-filter-trigger.active .trigger-text {
+    color: #fff;
+}
+
+.preview-filter-trigger .trigger-badge {
+    display: none;
+    min-width: 18px;
+    height: 18px;
+    line-height: 18px;
+    text-align: center;
+    background: #e74c3c;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 9px;
+    padding: 0 4px;
+    box-sizing: border-box;
+}
+
+.preview-filter-trigger.active .trigger-badge {
+    background: #fff;
+    color: #409eff;
+}
+
+/* ---------- 2. 筛选侧边栏（从左滑出） ---------- */
+.preview-filter-sidebar {
+    animation: sidebarSlideIn 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes sidebarSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.preview-filter-sidebar-header {
+    padding: 10px 15px;
+    border-bottom: 1px solid #e8e8e8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, #f0f2f5 0%, #e8eaed 100%);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+.preview-filter-sidebar-header span {
+    font-weight: 600;
+    font-size: 14px;
+    color: #303133;
+}
+
+.preview-filter-sidebar-header button {
+    background: #fff;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 10px;
+    color: #606266;
+    transition: all 0.2s ease;
+}
+
+.preview-filter-sidebar-header button:hover {
+    color: #409eff;
+    border-color: #409eff;
+    background: #ecf5ff;
+}
+
+#previewFilterPanelContainer {
+    padding: 10px 12px;
+}
+
+/* 侧边栏滚动条 */
+.preview-filter-sidebar::-webkit-scrollbar {
+    width: 5px;
+}
+.preview-filter-sidebar::-webkit-scrollbar-track { background: transparent; }
+.preview-filter-sidebar::-webkit-scrollbar-thumb { background: #c0c4cc; border-radius: 3px; }
+.preview-filter-sidebar::-webkit-scrollbar-thumb:hover { background: #909399; }
+
+/* ---------- 3. 可拖动分隔线 ---------- */
+.preview-divider {
+    width: 6px;
+    min-width: 6px;
+    flex-shrink: 0;
+    position: relative;
+    background: transparent;
+    transition: background 0.15s ease;
+}
+
+.preview-divider::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #e4e7ed;
+    transform: translateX(-50%);
+    transition: background 0.15s ease;
+}
+
+.preview-divider:hover,
+.preview-divider.dragging {
+    background: rgba(64, 158, 255, 0.08);
+}
+
+.preview-divider:hover::before,
+.preview-divider.dragging::before {
+    background: #409eff;
+    width: 2px;
+}
+
+.divider-handle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 36px;
+    background: #c0c4cc;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.preview-divider:hover .divider-handle,
+.preview-divider.dragging .divider-handle {
+    opacity: 1;
+    background: #409eff;
+}
+
+/* 拖动时的全局遮罩提示 */
+.divider-drag-hint {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    cursor: col-resize;
+    z-index: 99999;
+}
+
+/* ---------- 4. 预览弹窗内 FilterPanel 组件适配 ---------- */
+#previewFilterPanelContainer .filter-panel {
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+}
+
+#previewFilterPanelContainer .filter-panel-header {
+    display: none;
+}
+
+#previewFilterPanelContainer .filter-conditions-list {
+    padding: 0;
+}
+
+#previewFilterPanelContainer .filter-add-rule-btn {
+    width: 100%;
+    justify-content: center;
+}
