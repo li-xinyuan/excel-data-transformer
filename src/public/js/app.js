@@ -3,7 +3,53 @@
         function log(...args) { if (APP_DEBUG) log('[app]', ...args); }
         function warn(...args) { if (APP_DEBUG) warn('[app]', ...args); }
 
-        // Session 管理
+        
+        // ========== 带超时和重试的 fetch 封装 ==========
+        const FETCH_TIMEOUT = 60000;
+        const FETCH_MAX_RETRIES = 2;
+        
+        async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(timer);
+                return response;
+            } catch (error) {
+                clearTimeout(timer);
+                if (error.name === 'AbortError') {
+                    throw new Error('请求超时（' + (timeout / 1000) + '秒），服务器响应过慢');
+                }
+                throw error;
+            }
+        }
+        
+        async function fetchWithRetry(url, options = {}, maxRetries = FETCH_MAX_RETRIES) {
+            let lastError;
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    return await fetchWithTimeout(url, options);
+                } catch (error) {
+                    lastError = error;
+                    const isNetworkError = error.message.includes('Failed to fetch') || 
+                                          error.message.includes('NetworkError') ||
+                                          error.name === 'TypeError';
+                    const isTimeoutError = error.message.includes('请求超时');
+                    
+                    if (isNetworkError || isTimeoutError) {
+                        if (attempt < maxRetries) {
+                            warn('[fetch] 第' + (attempt + 1) + '次请求失败: ' + error.message + '，正在重试... (' + (attempt + 2) + '/' + (maxRetries + 1) + ')');
+                            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                            continue;
+                        }
+                    }
+                    throw error;
+                }
+            }
+            throw lastError;
+        }
+
+// Session 管理
         let sessionId = null;
         let sourceFileAnalysis = null;
         
@@ -263,7 +309,7 @@
                 log('[Preview] 手动映射:', manualMappings);
                 log('[Preview] 移除的映射:', removedMappings);
                 
-                const response = await fetch('/api/preview', {
+                const response = await fetchWithRetry('/api/preview', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -407,6 +453,19 @@
                 } else if (typeof error === 'string') {
                     errorMsg = error;
                 }
+                
+                // 针对网络错误提供更友好的提示
+                if (errorMsg.includes('Failed to fetch') || 
+                    errorMsg.includes('NetworkError') ||
+                    errorMsg.includes('TypeError')) {
+                    errorMsg = '网络连接失败，可能原因：\n' +
+                              '• 长时间未操作导致连接断开\n' +
+                              '• 服务器未启动或已停止\n' +
+                              '\n建议：刷新页面后重试';
+                } else if (errorMsg.includes('请求超时')) {
+                    errorMsg = '请求超时，服务器响应过慢，请稍后重试';
+                }
+                
                 showError('预览失败：' + errorMsg);
             } finally {
                 if (previewBtn) {
@@ -628,7 +687,7 @@
                     if (!currentPreviewData) return;
                     
                     const transformRules = getValueTransformRules();
-                    const response = await fetch('/api/preview', {
+                    const response = await fetchWithRetry('/api/preview', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({

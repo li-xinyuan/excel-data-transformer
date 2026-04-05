@@ -152,6 +152,12 @@ function startWebServer() {
         });
         
         const port = config.server.port;
+        
+        server.keepAliveTimeout = 65000;
+        server.headersTimeout = 66000;
+        server.timeout = 300000;
+        server.requestTimeout = 300000;
+        
         server.listen(port, () => {
             logger.info({ port }, 'Web server started');
             console.log(`\n  🌐 Web 界面已启动：http://localhost:${port}`);
